@@ -16,6 +16,11 @@ const lsGet = k => { try{ return JSON.parse(localStorage.getItem(k)); }catch(e){
 const lsSet = (k,v) => { try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} };
 let toastT;
 function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("on"),1800); }
+function showError(what, e){
+  const msg=(e&&(e.message||e.error_description||e.msg))||String(e);
+  const code=e&&(e.code||e.status)?" ["+(e.code||e.status)+"]":"";
+  dialog(what,'<p>Message technique à transmettre :</p><p style="font-family:ui-monospace,monospace;font-size:13px;background:var(--bg);padding:8px;border-radius:8px;word-break:break-word">'+esc(msg+code)+'</p>',[{label:"Fermer",primary:true}]);
+}
 function dialog(title, bodyHTML, actions){
   const d=$("dlg"); $("dlg-title").textContent=title; $("dlg-body").innerHTML=bodyHTML;
   const acts=$("dlg-acts"); acts.innerHTML="";
@@ -104,7 +109,7 @@ async function loadSheet(id){
 async function listSheets(){
   let rows=[];
   try{ rows = await api.list(); lsSet("sv-list", rows); }
-  catch(e){ rows = lsGet("sv-list") || []; toast("Hors ligne : liste de l’appareil"); }
+  catch(e){ rows = lsGet("sv-list") || []; console.error(e); showError("Lecture impossible", e); }
   // Fusionner ce qui attend d'être envoyé
   Object.values(pending).forEach(p=>{ const {data,...r}=p; const i=rows.findIndex(x=>x.id===p.id); if(i>=0) rows[i]=r; else rows.unshift(r); });
   return rows;
