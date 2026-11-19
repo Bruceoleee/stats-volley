@@ -6,16 +6,16 @@
 
 window.APP_CONFIG = {
   // Supabase > bouton « Connect » en haut, ou Project Settings > Data API > Project URL
-  supabaseUrl: "https://VOTRE-PROJET.supabase.co",
+  supabaseUrl: "https://dlbqldotomygteujkerb.supabase.co",
 
   // Supabase > Project Settings > API Keys > « Publishable key » (commence par sb_publishable_)
   // (l'ancienne clé « anon » de l'onglet Legacy API Keys fonctionne aussi)
-  supabaseAnonKey: "VOTRE-CLE-ANON",
+  supabaseAnonKey: "sb_publishable_tRbcUBmYXndcU1TP_icTKQ_7Zvm3W7-",
 
   // Le courriel du compte d'équipe créé dans Supabase > Authentication > Users.
   // Les utilisateurs de l'app n'ont jamais à le taper : seulement le mot de passe.
-  teamEmail: "equipe@exemple.com",
+  teamEmail: "stats@volley.app",
 
   // Nom affiché sur la page d'accueil et dans les rapports
-  teamName: "Mon équipe"
+  teamName: "Gaillards, Volleyball masculin"
 };
