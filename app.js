@@ -240,7 +240,8 @@ async function exportPDF(sheet){
   }
   const file = new File([blob], fname, { type:"application/pdf" });
   // iPhone/iPad : feuille de partage (Enregistrer dans Fichiers, AirDrop, courriel…)
-  if(navigator.canShare && navigator.canShare({ files:[file] })){
+  const touch = window.matchMedia && matchMedia("(pointer:coarse)").matches;
+  if(touch && navigator.canShare && navigator.canShare({ files:[file] })){
     try{ await navigator.share({ files:[file], title:fname }); return; }
     catch(e){ if(e && e.name==="AbortError") return; }
   }
