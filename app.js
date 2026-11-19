@@ -140,7 +140,7 @@ function go(h){ if(location.hash.slice(1)===h) route(); else location.hash = h; 
 function renderHome(){
   app.innerHTML =
   '<div class="wrap home">'+
-    '<div class="brand"><img src="icons/icon-192.png" alt=""><div><h1>Stats volley</h1><div class="sub">'+esc(TEAM)+'</div></div></div>'+
+    '<div class="brand"><img src="icon-192.png" alt=""><div><h1>Stats volley</h1><div class="sub">'+esc(TEAM)+'</div></div></div>'+
     (DEMO?'<div class="notice warn">Mode démo : les données restent sur cet appareil. Remplis config.js pour les enregistrer en ligne.</div>':'')+
     '<div class="homegrid">'+
       '<button class="hbtn main" type="button" data-new="passeurs"><span class="ico">P</span><span class="txt"><span class="lab">Stats passeurs</span><span class="desc">Nouvelle feuille : qualité et position des passes, hors système, réception adverse</span></span></button>'+
@@ -246,7 +246,7 @@ async function exportPDF(sheet){
 
 /* ---------- Connexion ---------- */
 function showLogin(expired){
-  app.innerHTML='<div class="login"><div class="brand"><img src="icons/icon-192.png" alt=""><div><h1>Stats volley</h1><div class="sub">'+esc(TEAM)+'</div></div></div>'+
+  app.innerHTML='<div class="login"><div class="brand"><img src="icon-192.png" alt=""><div><h1>Stats volley</h1><div class="sub">'+esc(TEAM)+'</div></div></div>'+
     '<form id="lf"><label class="f" for="pw">Mot de passe d’équipe<input type="password" id="pw" autocomplete="current-password" required></label>'+
     '<div class="err" id="lerr">'+(expired?"Session expirée, entre le mot de passe à nouveau.":"")+'</div>'+
     '<button class="btn primary" type="submit" id="lbtn">Entrer</button>'+

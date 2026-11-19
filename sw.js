@@ -1,10 +1,10 @@
 // Garde l'app disponible même avec un réseau faible au gymnase.
 // Les données passent toujours par Supabase (jamais mises en cache ici).
-const CACHE = "stats-volley-v1";
+const CACHE = "stats-volley-v2";
 const SHELL = [
   "./", "./index.html", "./style.css", "./config.js",
   "./app.js", "./passeurs.js", "./equipe.js", "./pdf.js",
-  "./manifest.webmanifest", "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png"
+  "./manifest.webmanifest", "./icon-180.png", "./icon-192.png", "./icon-512.png"
 ];
 const LIBS = [
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js",
