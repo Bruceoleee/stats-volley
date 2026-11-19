@@ -12,18 +12,21 @@ Compte environ 30 minutes, une seule fois.
    - mot de passe : le **mot de passe d'équipe** que tu donneras aux entraîneurs ;
    - coche **Auto Confirm User**.
 4. **Bloque les inscriptions** pour que personne d'autre ne puisse créer un compte : **Authentication** → **Sign In / Providers** (ou **Settings**) → désactive **Allow new users to sign up** → **Save**.
-5. **Project Settings** → **API** (ou **Data API**). Copie le **Project URL** et la clé **anon public**.
+5. Copie deux valeurs :
+   - le **Project URL** (`https://xxxx.supabase.co`) : bouton **Connect** en haut du projet, ou **Project Settings** → **Data API** ;
+   - la **Publishable key** (commence par `sb_publishable_`) : **Project Settings** → **API Keys**. Si tu vois un bouton **Create new API keys**, clique-le d'abord. L'ancienne clé **anon** (onglet **Legacy API Keys**) fonctionne aussi.
+   N'utilise jamais la **Secret key** ni la **service_role** : elles donnent accès à tout.
 
 ## 2. Remplir `config.js`
 
 Ouvre `config.js` dans un éditeur de texte et remplace :
 
 - `supabaseUrl` → le Project URL ;
-- `supabaseAnonKey` → la clé anon public ;
+- `supabaseAnonKey` → la Publishable key ;
 - `teamEmail` → le courriel choisi à l'étape 1.3 ;
 - `teamName` → le nom de ton équipe (affiché sur l'accueil et les rapports).
 
-La clé anon peut être publique : sans le mot de passe d'équipe, la base refuse toute lecture et toute écriture.
+La Publishable key peut être publique : sans le mot de passe d'équipe, la base refuse toute lecture et toute écriture.
 
 ## 3. Mettre l'app en ligne (GitHub Pages, gratuit)
 
