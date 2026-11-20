@@ -27,7 +27,9 @@ function passStats(E, who){
   return { total:p.length, M:c(null,"M"),A:c(null,"A"),J:c(null,"J"),X:c(null,"X"), byPos };
 }
 const hsStats = E => { const h=E.filter(e=>e.k==="h"); const R=h.filter(e=>e.r==="R").length; return {n:h.length,R,X:h.length-R}; };
-const recStats = E => { const r=E.filter(e=>e.k==="r"); const c=[0,1,2,3].map(n=>r.filter(e=>e.n===n).length); return {n:r.length,c,avg:r.length?r.reduce((s,e)=>s+e.n,0)/r.length:null}; };
+// Réception adverse : notes 0, 2 et 3 (les anciennes notes 1 sont ignorées)
+const RN=[0,2,3];
+const recStats = E => { const r=E.filter(e=>e.k==="r"&&RN.includes(e.n)); const c={}; RN.forEach(n=>c[n]=r.filter(e=>e.n===n).length); return {n:r.length,c,plus:c[2]+c[3]}; };
 const played = d => SETS.filter(s=>d.events.some(e=>e.s===s));
 
 function summary(sheet){
@@ -63,7 +65,7 @@ function courtSVG(s){
 function mount(root, sheet, ctx){
   const d=sheet.data, U=ctx.util, $=U.$, esc=U.esc, pct=U.pct;
   if(!SETS.includes(d.view) && d.view!=="all") d.view=1;
-  let correct=false;
+  let correct=false, sView=null;
   root.innerHTML =
   '<div class="meta">'+
     '<label class="f" for="opp">Adversaire<input type="text" id="opp" placeholder="Équipe" autocomplete="off"></label>'+
@@ -74,16 +76,16 @@ function mount(root, sheet, ctx){
   '<div class="bar"><div class="seg" id="sets"></div><div class="seg" id="setters"></div>'+
     '<div class="tools"><button class="btn" id="undo" type="button" aria-label="Annuler la dernière action">↶<span class="t"> Annuler</span></button>'+
     '<button class="btn" id="correct" type="button" aria-pressed="false" aria-label="Mode correction">−1<span class="t"> Corriger</span></button>'+
-    '<button class="btn primary" id="pdf" type="button">PDF<span class="t"> Rapport</span></button></div></div>'+
-  '<div class="tiles" id="tiles"></div>'+
+    '<button class="btn stats" id="stats" type="button">Stats</button>'+
+    '<button class="btn primary" id="pdf" type="button">PDF</button></div></div>'+
   '<section class="card" id="passcard"><div class="card-head"><h2>Passes en système · <span class="who" id="who"></span></h2><span class="sub" id="hint"></span></div>'+
-    '<div class="passwrap"><table class="setgrid" id="grid"></table><div class="courtbox"><div id="court"></div><div class="cap2">Part des passes envoyées à chaque position · efficacité = marquées + attaquables</div></div></div></section>'+
-  '<div class="two">'+
-    '<section class="card" id="hscard"><div class="card-head"><h2>Hors système</h2><span class="sub" id="hs-pct"></span></div><div class="bigrow c2" id="hs"></div></section>'+
-    '<section class="card adv" id="reccard"><div class="card-head"><h2>Réception adverse</h2><span class="sub">Toute l’équipe adverse</span></div>'+
-      '<div class="bigrow c4" id="rec"></div><div class="distrib" id="distrib" aria-hidden="true"></div><div class="stat-line" id="rec-stats"></div>'+
-      '<div class="legend"><b>3</b><span>Parfaite, toutes les options</span><b>2</b><span>Bonne, options limitées</span><b>1</b><span>Mauvaise, hors système</span><b>0</b><span>Ace ou renvoi direct</span></div></section>'+
-  '</div>';
+    '<table class="setgrid big-grid" id="grid"></table></section>'+
+  '<div class="two even">'+
+    '<section class="card" id="hscard"><div class="card-head"><h2>Hors système</h2><span class="sub">Toute l’équipe</span></div><div class="bigrow c2" id="hs"></div></section>'+
+    '<section class="card adv" id="reccard"><div class="card-head"><h2>Réception adverse</h2><span class="sub">3 parfaite · 2 jouable · 0 ace ou retour direct</span></div>'+
+      '<div class="bigrow c3" id="rec"></div></section>'+
+  '</div>'+
+  '<dialog class="statsdlg" id="sdlg" aria-labelledby="sd-t"><div class="sd-head"><h2 id="sd-t">Statistiques</h2><div class="seg" id="sd-scope"></div><button class="btn" type="button" id="sd-close">Fermer</button></div><div class="sd-body" id="sd-body"></div></dialog>';
 
   const changed = () => ctx.changed();
   function act(ev, key){
@@ -98,17 +100,13 @@ function mount(root, sheet, ctx){
     const f=root.querySelector('[data-key="'+key+'"]'); if(f){ f.classList.remove("flash"); void f.offsetWidth; f.classList.add("flash"); }
   }
   function seg(id, cap, items, cur, pick){
-    const box=$(id); box.innerHTML='<span class="cap">'+cap+'</span>';
+    const box=$(id); box.innerHTML=cap?'<span class="cap">'+cap+'</span>':'';
     items.forEach(it=>{ const b=document.createElement("button"); b.type="button"; b.textContent=it.lab; b.setAttribute("aria-pressed",String(cur===it.v)); b.onclick=()=>pick(it.v); box.appendChild(b); });
   }
   function render(){
     seg("sets","Set",[...SETS.map(s=>({v:s,lab:String(s)})),{v:"all",lab:"Match"}],d.view,v=>{d.view=v;render();});
     seg("setters","Passeur",[{v:1,lab:nameOf(d,1)},{v:2,lab:nameOf(d,2)},{v:"both",lab:"Les deux"}],d.who,v=>{d.who=v;render();});
     const E=filt(d,d.view), s=passStats(E,d.who), h=hsStats(E), r=recStats(E);
-    const label=d.who==="both"?"les deux":nameOf(d,d.who);
-    const tiles=[["Passes · "+label,s.total,"Manquées : "+s.X],["Marquées",pct(s.M,s.total),s.M+" sur "+s.total],["Efficacité",pct(s.M+s.A,s.total),"Marquées + attaquables"],
-      ["Hors système",pct(h.R,h.n),h.R+" réussies sur "+h.n],["Réception adv.",r.avg==null?"–":r.avg.toFixed(2),"Moyenne /3 · "+r.n+" réc."]];
-    $("tiles").innerHTML=tiles.map(t=>'<div class="tile"><div class="k">'+esc(t[0])+'</div><div class="v">'+t[1]+'</div><div class="d">'+esc(t[2])+'</div></div>').join("");
     $("who").textContent=d.who==="both"?nameOf(d,1)+" + "+nameOf(d,2):nameOf(d,d.who);
     $("passcard").classList.toggle("lock",d.view==="all"||d.who==="both");
     $("hscard").classList.toggle("lock",d.view==="all"); $("reccard").classList.toggle("lock",d.view==="all");
@@ -118,20 +116,39 @@ function mount(root, sheet, ctx){
     POS.forEach(pos=>{ const b=s.byPos[pos.id];
       html+='<tr><th class="row" scope="row">'+pos.lab+'<small>'+pos.sub+'</small></th>'+
         Q.map(q=>'<td><button type="button" class="cell q-'+q.id+'" data-key="p-'+pos.id+'-'+q.id+'" data-pos="'+pos.id+'" data-q="'+q.id+'" aria-label="'+pos.lab+' '+q.lab+'">'+b[q.id]+'</button></td>').join("")+
-        '<td class="tot">'+b.n+'<small>'+(b.n?Math.round(b.eff*100)+' % eff.':'&nbsp;')+'</small></td></tr>'; });
-    html+='<tr class="foot"><th class="row" scope="row">Total</th>'+Q.map(q=>'<td class="tot">'+s[q.id]+'<small>'+pct(s[q.id],s.total)+'</small></td>').join("")+'<td class="tot">'+s.total+'<small>'+pct(s.M+s.A,s.total)+' eff.</small></td></tr></tbody>';
+        '<td class="tot">'+b.n+'</td></tr>'; });
+    html+='<tr class="foot"><th class="row" scope="row">Total</th>'+Q.map(q=>'<td class="tot">'+s[q.id]+'</td>').join("")+'<td class="tot">'+s.total+'</td></tr></tbody>';
     $("grid").innerHTML=html;
     $("grid").querySelectorAll(".cell").forEach(b=>b.onclick=()=>act({k:"p",pos:b.dataset.pos,q:b.dataset.q},b.dataset.key));
-    $("court").innerHTML=courtSVG(s);
     $("hs").innerHTML='<button type="button" class="big q-M" data-key="h-R"><span class="n">'+h.R+'</span><span class="lab">Réussie</span></button><button type="button" class="big q-X" data-key="h-X"><span class="n">'+h.X+'</span><span class="lab">Manquée</span></button>';
-    $("hs-pct").textContent=h.n?pct(h.R,h.n)+" réussies sur "+h.n:"Toute l’équipe";
     $("hs").querySelectorAll(".big").forEach(b=>b.onclick=()=>act({k:"h",r:b.dataset.key.slice(2)},b.dataset.key));
-    $("rec").innerHTML=[0,1,2,3].map(n=>'<button type="button" class="big r-'+n+'" data-key="r-'+n+'" data-n="'+n+'" aria-label="Réception '+n+'"><span class="lab huge">'+n+'</span><span class="n" style="font-size:20px">'+r.c[n]+'</span></button>').join("");
+    $("rec").innerHTML=RN.map(n=>'<button type="button" class="big r-'+n+'" data-key="r-'+n+'" data-n="'+n+'" aria-label="Réception adverse '+n+'"><span class="lab huge">'+n+'</span><span class="n" style="font-size:20px">'+r.c[n]+'</span></button>').join("");
     $("rec").querySelectorAll(".big").forEach(b=>b.onclick=()=>act({k:"r",n:+b.dataset.n},b.dataset.key));
-    const col=["var(--q-m)","var(--q-a)","var(--q-j)","var(--q-x)"];
-    $("distrib").innerHTML=r.n?[0,1,2,3].map(n=>'<span style="width:'+(100*r.c[n]/r.n)+'%;background:'+col[n]+'"></span>').join(""):"";
-    $("rec-stats").innerHTML='<span>Moyenne <b>'+(r.avg==null?"–":r.avg.toFixed(2))+'</b> / 3</span><span>Parfaites <b>'+pct(r.c[3],r.n)+'</b></span><span>Hors syst. (0-1) <b>'+pct(r.c[0]+r.c[1],r.n)+'</b></span>';
   }
+
+  /* ---------- Panneau des stats ---------- */
+  function kv(k,v,dd){ return '<div class="kv"><span class="k">'+esc(k)+'</span><span class="v">'+v+'</span><span class="d">'+esc(dd||"")+'</span></div>'; }
+  function renderStats(){
+    seg("sd-scope","",[...SETS.map(s=>({v:s,lab:"Set "+s})),{v:"all",lab:"Match"}],sView,v=>{sView=v;renderStats();});
+    const E=filt(d,sView), st=passStats(E,"both"), h=hsStats(E), r=recStats(E);
+    let o='<div class="statrow">'+kv("Passes en système",st.total,"Manquées : "+st.X)+kv("Marquées",pct(st.M,st.total),st.M+" sur "+st.total)+kv("Efficacité",pct(st.M+st.A,st.total),"Marquées + attaquables")+
+      kv("Hors système",pct(h.R,h.n),h.R+" réussies sur "+h.n)+kv("Réc. adverse 2+",pct(r.plus,r.n),r.n+" réceptions")+'</div>';
+    o+='<section class="card"><h3>Par passeur</h3><div class="tscroll"><table class="st"><thead><tr><th>Passeur</th><th>Passes</th><th>Marquée</th><th>Attaquable</th><th>Jouable</th><th>Manquée</th><th>% marquée</th><th>% efficace</th></tr></thead><tbody>'+
+      [1,2].map(w=>{ const p=passStats(E,w); return '<tr><td>'+esc(nameOf(d,w))+'</td><td>'+p.total+'</td><td>'+p.M+'</td><td>'+p.A+'</td><td>'+p.J+'</td><td>'+p.X+'</td><td>'+pct(p.M,p.total)+'</td><td>'+pct(p.M+p.A,p.total)+'</td></tr>'; }).join("")+
+      '</tbody><tfoot><tr><td>Total</td><td>'+st.total+'</td><td>'+st.M+'</td><td>'+st.A+'</td><td>'+st.J+'</td><td>'+st.X+'</td><td>'+pct(st.M,st.total)+'</td><td>'+pct(st.M+st.A,st.total)+'</td></tr></tfoot></table></div></section>';
+    o+='<section class="card"><h3>Répartition par position</h3><div class="courts">'+
+      [[1,nameOf(d,1)],[2,nameOf(d,2)],["both","Les deux"]].map(([w,l])=>'<figure><figcaption>'+esc(l)+'</figcaption>'+courtSVG(passStats(E,w))+'</figure>').join("")+'</div>';
+    const s1=passStats(E,1), s2=passStats(E,2);
+    o+='<div class="tscroll"><table class="st"><thead><tr><th>Position</th><th>'+esc(nameOf(d,1))+'</th><th>'+esc(nameOf(d,2))+'</th><th>Total</th><th>Répartition</th><th>Efficacité</th></tr></thead><tbody>'+
+      POS.map(p=>{ const b=st.byPos[p.id]; return '<tr><td>'+p.lab+' · '+p.sub+'</td><td>'+s1.byPos[p.id].n+'</td><td>'+s2.byPos[p.id].n+'</td><td>'+b.n+'</td><td>'+pct(b.n,st.total)+'</td><td>'+(b.n?Math.round(b.eff*100)+" %":"–")+'</td></tr>'; }).join("")+
+      '</tbody></table></div></section>';
+    o+='<div class="two even"><section class="card"><h3>Hors système</h3><div class="statrow">'+kv("Réussies",h.R,pct(h.R,h.n))+kv("Manquées",h.X,pct(h.X,h.n))+'</div></section>'+
+      '<section class="card"><h3>Réception adverse</h3><div class="statrow">'+RN.map(n=>kv("Note "+n,pct(r.c[n],r.n),r.c[n]+" sur "+r.n)).join("")+kv("2 et plus",pct(r.plus,r.n),r.plus+" sur "+r.n)+'</div></section></div>';
+    $("sd-body").innerHTML=o;
+  }
+  $("stats").onclick=()=>{ sView=d.view; renderStats(); try{ $("sdlg").showModal(); }catch(e){ $("sdlg").setAttribute("open",""); } };
+  $("sd-close").onclick=()=>$("sdlg").close();
+
   $("opp").value=d.opp||""; $("date").value=d.date||""; $("n1").value=d.n1||""; $("n2").value=d.n2||"";
   $("opp").addEventListener("input",e=>{ d.opp=e.target.value; changed(); });
   $("date").addEventListener("change",e=>{ d.date=e.target.value; changed(); });
@@ -143,7 +160,7 @@ function mount(root, sheet, ctx){
     let idx=-1; for(let i=d.events.length-1;i>=0;i--){ if(d.view==="all"||d.events[i].s===d.view){ idx=i; break; } }
     if(idx<0){ U.toast("Rien à annuler"); return; }
     const e=d.events[idx];
-    const txt=e.k==="p"?"Passe "+POSLAB[e.pos]+" "+QLAB[e.q]+" ("+nameOf(d,e.w)+")":e.k==="h"?"Hors système "+(e.r==="R"?"réussie":"manquée"):"Réception "+e.n;
+    const txt=e.k==="p"?"Passe "+POSLAB[e.pos]+" "+QLAB[e.q]+" ("+nameOf(d,e.w)+")":e.k==="h"?"Hors système "+(e.r==="R"?"réussie":"manquée"):"Réception adverse "+e.n;
     d.events.splice(idx,1); changed(); render(); U.toast("Annulé : "+txt);
   };
   $("correct").onclick=()=>{ correct=!correct; $("correct").setAttribute("aria-pressed",String(correct)); document.body.classList.toggle("correct",correct); U.toast(correct?"Mode correction : chaque touche retire 1":"Saisie normale"); };
@@ -151,10 +168,10 @@ function mount(root, sheet, ctx){
   render();
 }
 
-/* ---------- Rapport PDF ---------- */
+/* ---------- Rapport PDF : page 1 = match complet, puis une page identique par set ---------- */
 function pdf(sheet, team){
   const d=sheet.data, R=window.VSReport(), {doc,M,CW,C,mix,P}=R;
-  const sets=played(d), Eall=filt(d,"all"), st=passStats(Eall,"both"), h=hsStats(Eall), r=recStats(Eall);
+  const sets=played(d);
   const name=w=>nameOf(d,w);
 
   function court(x,y0,w,s,label){
@@ -176,30 +193,34 @@ function pdf(sheet, team){
     R.fill(C.hi); doc.circle(X(SETTER[0]),Y(SETTER[1]),5,"F"); R.font("bold",6,C.ink); doc.text("P",X(SETTER[0]),Y(SETTER[1])+2.2,{align:"center"});
     R.font("normal",8,C.muted); doc.text(s.total+" passes · "+P(s.M+s.A,s.total)+" eff.",x+w/2,Y(300)+8,{align:"center"});
   }
-  const passTable=E=>R.table([{h:"Passeur",w:2.2},{h:"Passes",w:1},{h:"Marquée",w:1,color:C.M},{h:"Attaquable",w:1.15,color:C.A},{h:"Jouable",w:1,color:C.J},{h:"Manquée",w:1,color:C.X},{h:"% marquée",w:1.1},{h:"% efficace",w:1.1}],
-    [1,2,"both"].map(w=>{ const s=passStats(E,w); return [w==="both"?"Total":name(w),s.total,s.M,s.A,s.J,s.X,P(s.M,s.total),P(s.M+s.A,s.total)]; }),{boldLast:true});
-  const posTable=E=>{ const s1=passStats(E,1), s2=passStats(E,2), t=passStats(E,"both");
-    const rows=POS.map(p=>[p.lab+" · "+p.sub,s1.byPos[p.id].n,s2.byPos[p.id].n,t.byPos[p.id].n,P(t.byPos[p.id].n,t.total),t.byPos[p.id].n?Math.round(t.byPos[p.id].eff*100)+" %":"–"]);
-    rows.push(["Total",s1.total,s2.total,t.total,t.total?"100 %":"–",P(t.M+t.A,t.total)]);
-    R.table([{h:"Position",w:2.4},{h:name(1).slice(0,12),w:1.1},{h:name(2).slice(0,12),w:1.1},{h:"Total",w:.9},{h:"Répartition",w:1.2},{h:"Efficacité",w:1.1}],rows,{boldLast:true,rh:17}); };
-  const hsRec=E=>{ const hh=hsStats(E), rr=recStats(E); R.ensure(84); const bw=(CW-12)/2;
-    R.statBox(M,R.y,bw,"Hors système",P(hh.R,hh.n),"de réussite",[["Réussies : "+hh.R,C.M],["Manquées : "+hh.X,C.X]]);
-    R.recBox(M+bw+12,R.y,bw,"Réception adverse",rr,[C.M,C.A,C.J,C.X]); R.y+=88; };
-
-  R.header("STATS PASSEURS", (d.opp?"contre "+d.opp:"Adversaire non précisé")+"  ·  "+(d.date||""), team+" · sets joués : "+sets.length+" (deux de trois)", "Passeurs : "+name(1)+" et "+name(2));
-  R.tiles([["Passes en système",st.total,"Manquées : "+st.X],["Marquées",P(st.M,st.total),st.M+" sur "+st.total],["Efficacité",P(st.M+st.A,st.total),"marquées + attaquables"],
-    ["Hors système",P(h.R,h.n),h.R+" sur "+h.n],["Réception adverse",r.avg==null?"–":r.avg.toFixed(2),"moyenne sur 3"]]);
-  R.title("Passeur en système · match complet"); passTable(Eall);
-  R.title("Répartition par position","Intensité = part des passes · P = position du passeur",175);
-  const cw=(CW-2*28)/3, cy0=R.y+14;
-  court(M,cy0,cw,passStats(Eall,1),name(1)); court(M+cw+28,cy0,cw,passStats(Eall,2),name(2)); court(M+2*(cw+28),cy0,cw,st,"Les deux passeurs");
-  R.y=cy0+cw*300/320+14;
-  posTable(Eall);
-  R.title("Hors système et réception adverse",null,84); hsRec(Eall);
-  sets.forEach((s,i)=>{ if(i===0){ doc.addPage(); R.y=M; } const E=filt(d,s); R.ensure(330);
-    R.title("Set "+s, passStats(E,"both").total+" passes en système"); passTable(E); posTable(E); hsRec(E); R.y+=6; });
+  function body(E, scopeLabel){
+    const st=passStats(E,"both"), h=hsStats(E), r=recStats(E);
+    R.tiles([["Passes en système",st.total,"Manquées : "+st.X],["Marquées",P(st.M,st.total),st.M+" sur "+st.total],["Efficacité",P(st.M+st.A,st.total),"marquées + attaquables"],
+      ["Hors système",P(h.R,h.n),h.R+" réussies sur "+h.n],["Réc. adverse 2+",P(r.plus,r.n),r.n+" réceptions"]]);
+    R.title("Passeur en système · "+scopeLabel);
+    R.table([{h:"Passeur",w:2.2},{h:"Passes",w:1},{h:"Marquée",w:1,color:C.M},{h:"Attaquable",w:1.15,color:C.A},{h:"Jouable",w:1,color:C.J},{h:"Manquée",w:1,color:C.X},{h:"% marquée",w:1.1},{h:"% efficace",w:1.1}],
+      [1,2,"both"].map(w=>{ const s=passStats(E,w); return [w==="both"?"Total":name(w),s.total,s.M,s.A,s.J,s.X,P(s.M,s.total),P(s.M+s.A,s.total)]; }),{boldLast:true});
+    R.title("Répartition par position","Intensité = part des passes · P = position du passeur");
+    const cw=(CW-2*28)/3, cy0=R.y+14;
+    court(M,cy0,cw,passStats(E,1),name(1)); court(M+cw+28,cy0,cw,passStats(E,2),name(2)); court(M+2*(cw+28),cy0,cw,st,"Les deux passeurs");
+    R.y=cy0+cw*300/320+14;
+    const s1=passStats(E,1), s2=passStats(E,2);
+    const rows=POS.map(p=>[p.lab+" · "+p.sub,s1.byPos[p.id].n,s2.byPos[p.id].n,st.byPos[p.id].n,P(st.byPos[p.id].n,st.total),st.byPos[p.id].n?Math.round(st.byPos[p.id].eff*100)+" %":"–"]);
+    rows.push(["Total",s1.total,s2.total,st.total,st.total?"100 %":"–",P(st.M+st.A,st.total)]);
+    R.table([{h:"Position",w:2.4},{h:name(1).slice(0,12),w:1.1},{h:name(2).slice(0,12),w:1.1},{h:"Total",w:.9},{h:"Répartition",w:1.2},{h:"Efficacité",w:1.1}],rows,{boldLast:true,rh:16});
+    R.title("Hors système et réception adverse");
+    const bw=(CW-12)/2;
+    R.statBox(M,R.y,bw,"Hors système",P(h.R,h.n),"de réussite",[["Réussies : "+h.R,C.M],["Manquées : "+h.X,C.X]]);
+    R.distBox(M+bw+12,R.y,bw,"Réception adverse",P(r.plus,r.n),"de 2 et plus · "+r.n+" réc.",RN.map(n=>({lab:"Note "+n,count:r.c[n],pct:P(r.c[n],r.n),color:n===0?C.M:n===2?C.J:C.X})));
+    R.y+=86;
+  }
+  const opp=(d.opp?"contre "+d.opp:"Adversaire non précisé")+"  ·  "+(d.date||"");
+  R.header("STATS PASSEURS", opp, team+" · sets joués : "+sets.length, "Passeurs : "+name(1)+" et "+name(2));
+  body(filt(d,"all"),"match complet");
+  sets.forEach(s=>{ R.newPage(); R.subHeader("SET "+s, opp, team); body(filt(d,s),"set "+s); });
   return R.finish("Stats passeurs · "+team+(d.opp?" · contre "+d.opp:"")+" · "+(d.date||""));
 }
+
 
 window.PasseursSheet = { blank, mount, summary, pdf };
 })();

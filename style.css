@@ -263,3 +263,42 @@ dialog .acts{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin
   .tile{padding:6px 8px}.tile .v{font-size:22px}.tile .d{font-size:11px}
 }
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+
+/* Panneau des statistiques (bouton Stats) */
+dialog.statsdlg{width:min(1040px,calc(100% - 16px));max-width:none;max-height:calc(100% - 16px);padding:0;overflow:hidden;display:none;flex-direction:column}
+dialog.statsdlg[open]{display:flex}
+.sd-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+.sd-head h2{margin-right:auto}
+.sd-body{overflow:auto;-webkit-overflow-scrolling:touch;padding:14px;display:flex;flex-direction:column;gap:12px;background:var(--bg)}
+.sd-body .card{gap:8px}
+.statrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px}
+.kv{display:flex;flex-direction:column;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.kv .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.kv .v{font-family:var(--display);font-size:24px;font-weight:700;line-height:1.05}
+.kv .d{font-size:12px;color:var(--muted)}
+table.st{border-collapse:collapse;width:100%;font-size:14px;background:var(--panel)}
+.st th,.st td{padding:6px 6px;text-align:center;border-bottom:1px solid var(--line);white-space:nowrap}
+.st thead th{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;font-weight:600}
+.st thead tr.grp th{font-family:var(--display);font-size:14px;color:var(--ink);border-bottom:2px solid var(--accent)}
+.st td:first-child,.st th:first-child{text-align:left;position:sticky;left:0;background:var(--panel)}
+.st tfoot td{font-weight:700;border-top:2px solid var(--ink);border-bottom:0}
+.st .sep{border-left:1px solid var(--line)}
+.courts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:700px){.courts{grid-template-columns:1fr}}
+.courts figure{margin:0;display:flex;flex-direction:column;gap:4px}
+.courts figcaption{font-family:var(--display);font-weight:700;font-size:16px;text-align:center;text-transform:uppercase}
+.courts svg{width:100%;height:auto;max-width:360px;margin:0 auto;display:block}
+.btn.stats{background:var(--hi);border-color:var(--hi);color:#141a26}
+
+/* Joueurs du set */
+.lineup{display:flex;flex-direction:column;gap:6px;max-height:55vh;overflow:auto}
+.lineup .lr{display:grid;grid-template-columns:44px 44px 1fr 44px;gap:6px;align-items:center;padding:4px 6px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.lineup .lr.off{opacity:.55;border-style:dashed}
+.lineup .lr .nm{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lineup .lr .nm b{font-family:var(--display);font-size:18px;color:var(--accent);margin-right:6px}
+.lineup .mv{min-height:40px;min-width:40px;border:1px solid var(--line);background:var(--bg);border-radius:8px;font-size:18px;font-weight:700}
+.lineup .tg{min-height:40px;border-radius:8px;border:1px solid var(--line);font-weight:700;font-size:13px}
+.lineup .tg[aria-pressed="true"]{background:var(--q-m-bg);color:var(--q-m);border-color:color-mix(in srgb,var(--q-m) 40%,transparent)}
+.lineup .sec{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
+.big-grid .cell{min-height:62px;font-size:28px}
+@media (max-width:520px){.big-grid .cell{min-height:52px;font-size:24px}}

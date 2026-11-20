@@ -7,8 +7,9 @@ const mix = (c,a) => c.map(v => Math.round(255-(255-v)*a));
 
 function Report(opts){
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit:"pt", format:"letter" });
-  const W=612, H=792, M=40, CW=W-2*M;
+  opts = opts || {};
+  const doc = new jsPDF({ unit:"pt", format:"letter", orientation: opts.landscape ? "landscape" : "portrait" });
+  const W=opts.landscape?792:612, H=opts.landscape?612:792, M=opts.landscape?32:40, CW=W-2*M;
   const r = { doc, W, H, M, CW, C, mix, y:M };
   r.font = (st,sz,col) => { doc.setFont("helvetica",st); doc.setFontSize(sz); doc.setTextColor(...(col||C.ink)); };
   r.fill = c => doc.setFillColor(...c);
@@ -16,6 +17,16 @@ function Report(opts){
   r.P = (a,b) => b ? Math.round(100*a/b)+" %" : "–";
   r.ensure = h => { if(r.y+h > H-46){ doc.addPage(); r.y=M; } };
 
+  r.newPage = () => { doc.addPage(); r.y=M; };
+  // Bandeau plus petit pour les pages de set
+  r.subHeader = (title, line1, right1) => {
+    r.fill(C.accent); doc.rect(0,0,W,52,"F");
+    r.fill(C.hi); doc.rect(0,52,W,3,"F");
+    r.font("bold",18,C.white); doc.text(title,M,33); const tw=doc.getTextWidth(title);
+    r.font("normal",10,C.white); doc.text(line1,M+tw+14,33);
+    if(right1) doc.text(right1,W-M,33,{align:"right"});
+    r.y = 72;
+  };
   r.header = (title, line1, right1, right2) => {
     r.fill(C.accent); doc.rect(0,0,W,84,"F");
     r.fill(C.hi); doc.rect(0,84,W,4,"F");
@@ -87,6 +98,19 @@ function Report(opts){
       r.fill(mix(colors[n],.18)); doc.roundedRect(cx,y0+26,26,36,4,4,"F");
       r.font("bold",8,colors[n]); doc.text(String(n),cx+13,y0+37,{align:"center"});
       r.font("bold",13,C.ink); doc.text(String(rs.c[n]),cx+13,y0+55,{align:"center"}); });
+  };
+  r.distBox = (x, y0, w, label, big, small, items, h) => {
+    h = h || 76;
+    r.fill(C.soft); doc.roundedRect(x,y0,w,h,6,6,"F");
+    r.font("bold",9,C.muted); doc.text(label.toUpperCase(),x+12,y0+18);
+    r.font("bold",22,C.ink); doc.text(String(big),x+12,y0+46);
+    r.font("normal",9,C.muted); doc.text(small,x+12,y0+60);
+    const cw=38, gx=x+w-12-items.length*(cw+4)+4;
+    items.forEach((it,n)=>{ const cx=gx+n*(cw+4);
+      r.fill(mix(it.color,.16)); doc.roundedRect(cx,y0+10,cw,h-20,4,4,"F");
+      r.font("bold",8,it.color); doc.text(String(it.lab),cx+cw/2,y0+22,{align:"center"});
+      r.font("bold",13,C.ink); doc.text(String(it.count),cx+cw/2,y0+40,{align:"center"});
+      r.font("normal",8,C.muted); doc.text(String(it.pct),cx+cw/2,y0+53,{align:"center"}); });
   };
   r.statBox = (x, y0, w, label, big, small, lines) => {
     r.fill(C.soft); doc.roundedRect(x,y0,w,76,6,6,"F");
