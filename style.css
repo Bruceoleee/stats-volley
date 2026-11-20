@@ -302,3 +302,7 @@ table.st{border-collapse:collapse;width:100%;font-size:14px;background:var(--pan
 .lineup .sec{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
 .big-grid .cell{min-height:62px;font-size:28px}
 @media (max-width:520px){.big-grid .cell{min-height:52px;font-size:24px}}
+.st.eff td.hm{font-weight:600}
+.st.eff td .sub{font-size:11px}
+.st.eff th,.st.eff td{padding:6px 5px}
+.st.eff td:first-child{white-space:normal;min-width:88px}

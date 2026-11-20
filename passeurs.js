@@ -138,10 +138,13 @@ function mount(root, sheet, ctx){
       '</tbody><tfoot><tr><td>Total</td><td>'+st.total+'</td><td>'+st.M+'</td><td>'+st.A+'</td><td>'+st.J+'</td><td>'+st.X+'</td><td>'+pct(st.M,st.total)+'</td><td>'+pct(st.M+st.A,st.total)+'</td></tr></tfoot></table></div></section>';
     o+='<section class="card"><h3>Répartition par position</h3><div class="courts">'+
       [[1,nameOf(d,1)],[2,nameOf(d,2)],["both","Les deux"]].map(([w,l])=>'<figure><figcaption>'+esc(l)+'</figcaption>'+courtSVG(passStats(E,w))+'</figure>').join("")+'</div>';
-    const s1=passStats(E,1), s2=passStats(E,2);
-    o+='<div class="tscroll"><table class="st"><thead><tr><th>Position</th><th>'+esc(nameOf(d,1))+'</th><th>'+esc(nameOf(d,2))+'</th><th>Total</th><th>Répartition</th><th>Efficacité</th></tr></thead><tbody>'+
-      POS.map(p=>{ const b=st.byPos[p.id]; return '<tr><td>'+p.lab+' · '+p.sub+'</td><td>'+s1.byPos[p.id].n+'</td><td>'+s2.byPos[p.id].n+'</td><td>'+b.n+'</td><td>'+pct(b.n,st.total)+'</td><td>'+(b.n?Math.round(b.eff*100)+" %":"–")+'</td></tr>'; }).join("")+
-      '</tbody></table></div></section>';
+    const sets3=[[passStats(E,1),nameOf(d,1)],[passStats(E,2),nameOf(d,2)],[st,"Les deux"]];
+    const heat=(num,den)=>{ if(!den) return '<td class="hm">–</td>'; const v=num/den; return '<td class="hm" style="background:color-mix(in srgb,var(--q-m) '+Math.round(8+v*42)+'%,var(--panel))">'+Math.round(v*100)+' %</td>'; };
+    o+='<h3 style="margin-top:6px">Efficacité par position</h3><div class="tscroll"><table class="st eff"><thead><tr class="grp"><th></th>'+sets3.map(([,l])=>'<th colspan="3" class="sep">'+esc(l)+'</th>').join("")+'</tr>'+
+      '<tr><th>Position</th>'+sets3.map(()=>'<th class="sep">Passes</th><th>% marq.</th><th>% eff.</th>').join("")+'</tr></thead><tbody>'+
+      POS.map(p=>'<tr><td>'+p.lab+' · '+p.sub+'</td>'+sets3.map(([x])=>{ const b=x.byPos[p.id]; return '<td class="sep">'+b.n+(x.total?' <span class="sub">('+pct(b.n,x.total)+')</span>':'')+'</td>'+heat(b.M,b.n)+heat(b.M+b.A,b.n); }).join("")+'</tr>').join("")+
+      '</tbody><tfoot><tr><td>Total</td>'+sets3.map(([x])=>'<td class="sep">'+x.total+'</td>'+heat(x.M,x.total)+heat(x.M+x.A,x.total)).join("")+'</tr></tfoot></table></div>'+
+      '<p class="sub" style="margin:0">Entre parenthèses : part des passes du passeur envoyées à cette position. Plus la case est verte, plus le % est élevé.</p></section>';
     o+='<div class="two even"><section class="card"><h3>Hors système</h3><div class="statrow">'+kv("Réussies",h.R,pct(h.R,h.n))+kv("Manquées",h.X,pct(h.X,h.n))+'</div></section>'+
       '<section class="card"><h3>Réception adverse</h3><div class="statrow">'+RN.map(n=>kv("Note "+n,pct(r.c[n],r.n),r.c[n]+" sur "+r.n)).join("")+kv("2 et plus",pct(r.plus,r.n),r.plus+" sur "+r.n)+'</div></section></div>';
     $("sd-body").innerHTML=o;
@@ -200,14 +203,16 @@ function pdf(sheet, team){
     R.title("Passeur en système · "+scopeLabel);
     R.table([{h:"Passeur",w:2.2},{h:"Passes",w:1},{h:"Marquée",w:1,color:C.M},{h:"Attaquable",w:1.15,color:C.A},{h:"Jouable",w:1,color:C.J},{h:"Manquée",w:1,color:C.X},{h:"% marquée",w:1.1},{h:"% efficace",w:1.1}],
       [1,2,"both"].map(w=>{ const s=passStats(E,w); return [w==="both"?"Total":name(w),s.total,s.M,s.A,s.J,s.X,P(s.M,s.total),P(s.M+s.A,s.total)]; }),{boldLast:true});
-    R.title("Répartition par position","Intensité = part des passes · P = position du passeur");
-    const cw=(CW-2*28)/3, cy0=R.y+14;
-    court(M,cy0,cw,passStats(E,1),name(1)); court(M+cw+28,cy0,cw,passStats(E,2),name(2)); court(M+2*(cw+28),cy0,cw,st,"Les deux passeurs");
+    R.title("Répartition et efficacité par position","Intensité = part des passes · P = position du passeur");
+    const cw=(CW-2*40)/3, cy0=R.y+14;
+    court(M,cy0,cw,passStats(E,1),name(1)); court(M+cw+40,cy0,cw,passStats(E,2),name(2)); court(M+2*(cw+40),cy0,cw,st,"Les deux passeurs");
     R.y=cy0+cw*300/320+14;
-    const s1=passStats(E,1), s2=passStats(E,2);
-    const rows=POS.map(p=>[p.lab+" · "+p.sub,s1.byPos[p.id].n,s2.byPos[p.id].n,st.byPos[p.id].n,P(st.byPos[p.id].n,st.total),st.byPos[p.id].n?Math.round(st.byPos[p.id].eff*100)+" %":"–"]);
-    rows.push(["Total",s1.total,s2.total,st.total,st.total?"100 %":"–",P(st.M+st.A,st.total)]);
-    R.table([{h:"Position",w:2.4},{h:name(1).slice(0,12),w:1.1},{h:name(2).slice(0,12),w:1.1},{h:"Total",w:.9},{h:"Répartition",w:1.2},{h:"Efficacité",w:1.1}],rows,{boldLast:true,rh:16});
+    const g3=[[passStats(E,1),name(1)],[passStats(E,2),name(2)],[st,"Les deux"]];
+    const cols=[{h:"Position",w:2.1}];
+    g3.forEach(([,l])=>{ const g=l.slice(0,16); cols.push({h:"Passes",w:1.05,group:g},{h:"% marq.",w:1.1,group:g,color:C.M},{h:"% eff.",w:1.05,group:g,color:C.accent}); });
+    const rows=POS.map(p=>{ const r=[p.lab+" · "+p.sub]; g3.forEach(([x])=>{ const b=x.byPos[p.id]; r.push(b.n,P(b.M,b.n),P(b.M+b.A,b.n)); }); return r; });
+    const tr=["Total"]; g3.forEach(([x])=>tr.push(x.total,P(x.M,x.total),P(x.M+x.A,x.total))); rows.push(tr);
+    R.table(cols,rows,{boldLast:true,rh:14.5,fs:8.5,hfs:6.8});
     R.title("Hors système et réception adverse");
     const bw=(CW-12)/2;
     R.statBox(M,R.y,bw,"Hors système",P(h.R,h.n),"de réussite",[["Réussies : "+h.R,C.M],["Manquées : "+h.X,C.X]]);
