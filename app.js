@@ -173,72 +173,166 @@ function itemHTML(r){
   return '<div class="rec-item" data-id="'+esc(r.id)+'" data-type="'+esc(r.type)+'">'+
     '<div class="date"><b>'+d.d+'</b><span>'+d.m+'</span></div>'+
     '<button class="main" type="button" data-open aria-label="Ouvrir"><span class="opp"><span class="badge '+esc(r.type)+'">'+(TYPE_LAB[r.type]||r.type)+'</span>'+(r.adversaire?"vs "+esc(r.adversaire):"Adversaire non précisé")+'</span><span class="sub">'+(f?'<span class="fchip">'+esc(f.name)+'</span>':'')+esc(r.resume||"")+'</span></button>'+
-    '<div class="acts"><button class="btn sm" type="button" data-pdf>PDF</button><button class="btn sm" type="button" data-move>Dossier</button><button class="btn sm danger" type="button" data-del aria-label="Supprimer">✕</button></div></div>';
+    '<div class="acts"><button class="btn sm" type="button" data-pdf>PDF</button></div></div>';
 }
-function bindItems(root, onChange){
+function bindItems(root){
   root.querySelectorAll(".rec-item").forEach(el=>{
     const id=el.dataset.id, type=el.dataset.type;
     el.querySelector("[data-open]").onclick=()=>go(type+"/"+id);
     el.querySelector("[data-pdf]").onclick=async(e)=>{ const b=e.currentTarget; b.disabled=true; try{ const s=await loadSheet(id); await exportPDF(s); }catch(err){ toast("Impossible d’ouvrir la feuille"); } b.disabled=false; };
-    const mv=el.querySelector("[data-move]"); if(mv) mv.onclick=()=>moveDialog([id], onChange);
-    el.querySelector("[data-del]").onclick=()=>dialog("Supprimer cette feuille ?","<p>Elle sera effacée pour tous les appareils. Cette action est définitive.</p>",[
-      {label:"Annuler"},{label:"Supprimer",danger:true,run:async()=>{ try{ await deleteSheet(id); const m={...(settings.sheetFolder||{})}; delete m[id]; saveSettings({sheetFolder:m}); el.remove(); toast("Feuille supprimée"); }catch(e){ toast("Suppression impossible hors ligne"); } }}]);
   });
 }
 
-/* ---------- Dossiers (gardés dans les réglages partagés) ---------- */
+/* ---------- Explorateur : dossiers et sous-dossiers (gardés dans les réglages partagés) ---------- */
 const folders=()=>settings.folders||[];
-const folderOf=id=>{ const fid=(settings.sheetFolder||{})[id]; return fid?folders().find(f=>f.id===fid):null; };
+const fById=id=>folders().find(f=>f.id===id)||null;
+const folderOf=id=>{ const fid=(settings.sheetFolder||{})[id]; return fid?fById(fid):null; };
+const parentOf=f=>f&&f.parent&&fById(f.parent)?f.parent:null;
+const childFolders=pid=>folders().filter(f=>parentOf(f)===(pid||null)).sort((a,b)=>a.name.localeCompare(b.name,"fr"));
+const sheetFolderId=id=>{ const fid=(settings.sheetFolder||{})[id]; return fid&&fById(fid)?fid:null; };
+function descendants(fid){ const out=[]; const walk=p=>childFolders(p).forEach(f=>{ out.push(f.id); walk(f.id); }); walk(fid); return out; }
+function pathTo(fid){ const p=[]; let f=fById(fid); while(f){ p.unshift(f); f=fById(parentOf(f)); } return p; }
+function folderTreeOptions(exclude){
+  const out=[]; const walk=(pid,depth)=>childFolders(pid).forEach(f=>{ if(exclude&&exclude.has(f.id)) return; out.push({f,depth}); walk(f.id,depth+1); }); walk(null,0); return out;
+}
 function askName(title, initial, cb){
   dialog(title,'<label class="f" for="fname">Nom du dossier<input type="text" id="fname" autocomplete="off" placeholder="ex. Tournoi Chicoutimi 22 nov."></label>',[
     {label:"Annuler"},
     {label:"Enregistrer",primary:true,run:()=>{ const v=$("fname").value.trim(); if(!v){ toast("Écris un nom"); return true; } cb(v); }}]);
   $("fname").value=initial||""; setTimeout(()=>$("fname").focus(),50);
 }
-function moveDialog(ids, onChange){
-  const cur=ids.length===1?(settings.sheetFolder||{})[ids[0]]||"":"";
-  const opts=[{id:"",name:"Aucun dossier"},...folders()];
-  dialog(ids.length>1?"Placer "+ids.length+" feuilles dans…":"Placer dans un dossier",
-    '<div class="flist">'+opts.map(f=>'<button type="button" class="chip-btn" data-fid="'+esc(f.id)+'" aria-pressed="'+(f.id===cur)+'">'+esc(f.name)+'</button>').join("")+'<button type="button" class="chip-btn add" id="fnew">+ Nouveau dossier</button></div>',
-    [{label:"Fermer"}]);
-  const apply=fid=>{ const m={...(settings.sheetFolder||{})}; ids.forEach(id=>{ if(fid) m[id]=fid; else delete m[id]; }); saveSettings({sheetFolder:m}); $("dlg").close(); toast(fid?"Classée dans « "+folders().find(f=>f.id===fid).name+" »":"Retirée du dossier"); onChange&&onChange(); };
-  document.querySelectorAll("#dlg [data-fid]").forEach(b=>b.onclick=()=>apply(b.dataset.fid));
-  $("fnew").onclick=()=>{ $("dlg").close(); askName("Nouveau dossier","",name=>{ const f={id:uid(),name}; saveSettings({folders:[...folders(),f]}); apply(f.id); }); };
+function newFolder(parent, cb){ askName("Nouveau dossier","",name=>{ const f={id:uid(),name,parent:parent||null}; saveSettings({folders:[...folders(),f]}); cb&&cb(f); }); }
+// Déplacer des feuilles et/ou des dossiers vers un dossier choisi dans l'arbre
+function moveDialog(sheetIds, folderIds, onDone){
+  const exclude=new Set(); folderIds.forEach(id=>{ exclude.add(id); descendants(id).forEach(x=>exclude.add(x)); });
+  const n=sheetIds.length+folderIds.length;
+  const opts=[{f:{id:"",name:"Enregistrements"},depth:0,root:true},...folderTreeOptions(exclude).map(o=>({...o,depth:o.depth+1}))];
+  dialog(n>1?"Déplacer "+n+" éléments vers…":"Déplacer vers…",
+    '<div class="tree">'+opts.map(o=>'<button type="button" class="treerow" data-dest="'+esc(o.f.id)+'" style="padding-left:'+(10+o.depth*20)+'px"><span class="ficon'+(o.root?' root':'')+'" aria-hidden="true"></span>'+esc(o.f.name)+'</button>').join("")+'</div>'+
+    '<button type="button" class="btn sm" id="mvnew" style="margin-top:8px">+ Nouveau dossier à la racine</button>',
+    [{label:"Annuler"}]);
+  const apply=dest=>{
+    const m={...(settings.sheetFolder||{})}; sheetIds.forEach(id=>{ if(dest) m[id]=dest; else delete m[id]; });
+    const fl=folders().map(f=>folderIds.includes(f.id)?{...f,parent:dest||null}:f);
+    saveSettings({sheetFolder:m,folders:fl}); $("dlg").close();
+    toast("Déplacé dans « "+(dest?fById(dest).name:"Enregistrements")+" »"); onDone&&onDone();
+  };
+  document.querySelectorAll("#dlg [data-dest]").forEach(b=>b.onclick=()=>apply(b.dataset.dest));
+  $("mvnew").onclick=()=>{ $("dlg").close(); newFolder(null,f=>apply(f.id)); };
 }
 
-let filter="all", folderFilter="all";
-async function renderRecords(){
-  app.innerHTML='<div class="wrap">'+topbar("Enregistrements")+
-    '<div class="folders" id="folders"></div><div class="filters" id="filters"></div><div class="folderbar" id="folderbar"></div><div class="rec-list" id="list"><div class="empty">Chargement…</div></div></div>';
+let filter="all", selecting=false, selected=new Set(), cachedRows=null;
+async function renderRecords(folderId){
+  folderId=folderId&&fById(folderId)?folderId:(folderId||null);
+  app.innerHTML='<div class="wrap explorer">'+topbar("Enregistrements")+
+    '<div class="crumbs" id="crumbs"></div><div class="xbar" id="xbar"></div><div class="xlist" id="xlist"><div class="empty">Chargement…</div></div><div class="selbar" id="selbar" hidden></div></div>';
   bindGo(app);
+  if(cachedRows) draw(); // affichage immédiat, puis mise à jour
   await loadSettings();
-  let rows = await listSheets();
-  const draw=()=>{
-    if(folderFilter!=="all" && folderFilter!=="none" && !folders().some(f=>f.id===folderFilter)) folderFilter="all";
-    const inFolder=r=>folderFilter==="all"||(folderFilter==="none"?!folderOf(r.id):(settings.sheetFolder||{})[r.id]===folderFilter);
-    const count=fid=>rows.filter(r=>fid==="none"?!folderOf(r.id):(settings.sheetFolder||{})[r.id]===fid).length;
-    $("folders").innerHTML='<span class="cap">Dossiers</span>'+[["all","Toutes ("+rows.length+")"],["none","Sans dossier ("+count("none")+")"],...folders().map(f=>[f.id,f.name+" ("+count(f.id)+")"])]
-      .map(([v,l])=>'<button class="chip-btn'+(v!=="all"&&v!=="none"?' folder':'')+'" type="button" data-ff="'+esc(v)+'" aria-pressed="'+(folderFilter===v)+'">'+esc(l)+'</button>').join("")+
-      '<button class="chip-btn add" type="button" id="addfolder">+ Nouveau dossier</button>';
-    $("folders").querySelectorAll("[data-ff]").forEach(b=>b.onclick=()=>{ folderFilter=b.dataset.ff; draw(); });
-    $("addfolder").onclick=()=>askName("Nouveau dossier","",name=>{ const f={id:uid(),name}; saveSettings({folders:[...folders(),f]}); folderFilter=f.id; draw(); });
-    $("filters").innerHTML='<span class="cap">Type</span>'+[["all","Toutes"],["passeurs","Passeurs"],["equipe","Équipe"]].map(([v,l])=>'<button class="chip-btn" type="button" data-f="'+v+'" aria-pressed="'+(filter===v)+'">'+l+'</button>').join("");
-    $("filters").querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>{ filter=b.dataset.f; draw(); });
-    const r=rows.filter(x=>(filter==="all"||x.type===filter)&&inFolder(x));
-    const fobj=folders().find(f=>f.id===folderFilter);
-    $("folderbar").innerHTML=(r.length?'<button class="btn primary" type="button" id="recapbtn">Rapport récapitulatif</button>':'')+
-      (fobj?'<button class="btn" type="button" id="renf">Renommer le dossier</button><button class="btn danger" type="button" id="delf">Supprimer le dossier</button>':'');
-    if($("recapbtn")) $("recapbtn").onclick=()=>recapDialog(r, fobj?fobj.name:"");
-    if(fobj){
-      $("renf").onclick=()=>askName("Renommer le dossier",fobj.name,name=>{ saveSettings({folders:folders().map(f=>f.id===fobj.id?{...f,name}:f)}); draw(); });
-      $("delf").onclick=()=>dialog("Supprimer le dossier « "+fobj.name+" » ?","<p>Les feuilles ne sont pas supprimées : elles retournent dans « Sans dossier ».</p>",[{label:"Annuler"},{label:"Supprimer le dossier",danger:true,run:()=>{
-        const m={...(settings.sheetFolder||{})}; Object.keys(m).forEach(k=>{ if(m[k]===fobj.id) delete m[k]; });
-        saveSettings({folders:folders().filter(f=>f.id!==fobj.id),sheetFolder:m}); folderFilter="all"; draw(); }}]);
-    }
-    $("list").innerHTML = r.length ? r.map(itemHTML).join("") : '<div class="empty">'+(fobj?'Ce dossier est vide. Utilise le bouton « Dossier » d’une feuille pour l’y placer.':'Aucune feuille ici pour l’instant.')+'</div>';
-    bindItems($("list"), draw);
-  };
+  if(folderId && !fById(folderId)){ go("enregistrements"); return; }
+  cachedRows = await listSheets();
   draw();
+
+  function draw(){
+    const rows=cachedRows||[];
+    const here=folderId||null;
+    const deepIds=here?[here,...descendants(here)]:null;
+    const countIn=fid=>{ const ids=[fid,...descendants(fid)]; return rows.filter(r=>ids.includes(sheetFolderId(r.id))).length; };
+    // Fil d'Ariane
+    const path=here?pathTo(here):[];
+    $("crumbs").innerHTML='<button type="button" class="crumb'+(here?'':' cur')+'" data-goto="" data-drop="">Enregistrements</button>'+
+      path.map((f,i)=>'<span class="sepc" aria-hidden="true">›</span><button type="button" class="crumb'+(i===path.length-1?' cur':'')+'" data-goto="'+esc(f.id)+'" data-drop="'+esc(f.id)+'">'+esc(f.name)+'</button>').join("");
+    $("crumbs").querySelectorAll("[data-goto]").forEach(b=>b.onclick=()=>{ if(!b.classList.contains("cur")) go("enregistrements"+(b.dataset.goto?"/"+b.dataset.goto:"")); });
+    // Barre d'outils
+    const sheetsHere=rows.filter(r=>sheetFolderId(r.id)===here&&(filter==="all"||r.type===filter));
+    const sub=childFolders(here);
+    const fobj=here?fById(here):null;
+    $("xbar").innerHTML='<div class="seg"><span class="cap">Type</span>'+[["all","Toutes"],["passeurs","Passeurs"],["equipe","Équipe"]].map(([v,l])=>'<button type="button" data-f="'+v+'" aria-pressed="'+(filter===v)+'">'+l+'</button>').join("")+'</div>'+
+      '<div class="xtools"><button class="btn" type="button" id="xnew">+ Dossier</button>'+
+      '<button class="btn" type="button" id="xsel" aria-pressed="'+selecting+'">'+(selecting?'Terminer':'Sélectionner')+'</button>'+
+      '<button class="btn primary" type="button" id="xrecap">Rapport récapitulatif</button>'+
+      (fobj?'<button class="btn" type="button" id="xmore" aria-label="Options du dossier">⋯</button>':'')+'</div>';
+    $("xbar").querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>{ filter=b.dataset.f; draw(); });
+    $("xnew").onclick=()=>newFolder(here,()=>draw());
+    $("xsel").onclick=()=>{ selecting=!selecting; selected.clear(); draw(); };
+    $("xrecap").onclick=()=>{ const pool=rows.filter(r=>(here?deepIds.includes(sheetFolderId(r.id)):true)); if(!pool.length){ toast("Aucune feuille ici"); return; } recapDialog(pool, fobj?fobj.name:""); };
+    if(fobj) $("xmore").onclick=()=>folderMenu(fobj);
+    // Contenu : dossiers puis feuilles
+    let h='';
+    sub.forEach(f=>{ const n=countIn(f.id), nf=childFolders(f.id).length;
+      h+='<div class="xrow folder" data-fid="'+esc(f.id)+'" data-drop="'+esc(f.id)+'">'+
+        (selecting?'<span class="xcheck"></span>':'')+
+        '<button type="button" class="xmain" data-openf="'+esc(f.id)+'"><span class="ficon" aria-hidden="true"></span><span class="xtxt"><span class="xname">'+esc(f.name)+'</span><span class="sub">'+n+' feuille'+(n>1?'s':'')+(nf?' · '+nf+' dossier'+(nf>1?'s':''):'')+'</span></span><span class="chev" aria-hidden="true">›</span></button>'+
+        (selecting?'':'<button type="button" class="btn sm ghost" data-fmenu="'+esc(f.id)+'" aria-label="Options du dossier">⋯</button>')+'</div>'; });
+    sheetsHere.forEach(r=>{ const dp=dateParts(r.date), chk=selected.has(r.id);
+      h+='<div class="xrow sheet'+(chk?' sel':'')+'" data-id="'+esc(r.id)+'" data-type="'+esc(r.type)+'"'+(selecting?'':' draggable="true"')+'>'+
+        (selecting?'<label class="xcheck"><input type="checkbox" data-pick="'+esc(r.id)+'" '+(chk?'checked':'')+' aria-label="Sélectionner"></label>':'')+
+        '<button type="button" class="xmain" data-open><span class="doc '+esc(r.type)+'" aria-hidden="true">'+(r.type==="passeurs"?"P":"É")+'</span><span class="xtxt"><span class="xname">'+(r.adversaire?"vs "+esc(r.adversaire):"Adversaire non précisé")+'</span><span class="sub">'+dp.d+' '+dp.m+(dp.y?' '+dp.y:'')+' · '+(TYPE_LAB[r.type]||"")+' · '+esc(r.resume||"")+'</span></span></button>'+
+        (selecting?'':'<div class="acts"><button class="btn sm" type="button" data-pdf>PDF</button><button class="btn sm ghost" type="button" data-smenu aria-label="Options de la feuille">⋯</button></div>')+'</div>'; });
+    if(!sub.length && !sheetsHere.length) h='<div class="empty">'+(here?'Ce dossier est vide. Utilise « Déplacer » sur une feuille pour l’y placer, ou crée un sous-dossier.':'Aucune feuille pour l’instant. Crée-en une depuis l’accueil.')+'</div>';
+    $("xlist").innerHTML=h;
+    // Actions
+    $("xlist").querySelectorAll("[data-openf]").forEach(b=>b.onclick=()=>{ if(selecting){ const id=b.dataset.openf; selected.has("f:"+id)?selected.delete("f:"+id):selected.add("f:"+id); draw(); return; } go("enregistrements/"+b.dataset.openf); });
+    $("xlist").querySelectorAll("[data-fmenu]").forEach(b=>b.onclick=()=>folderMenu(fById(b.dataset.fmenu)));
+    $("xlist").querySelectorAll(".xrow.sheet").forEach(el=>{
+      const id=el.dataset.id, type=el.dataset.type;
+      el.querySelector("[data-open]").onclick=()=>{ if(selecting){ selected.has(id)?selected.delete(id):selected.add(id); draw(); return; } go(type+"/"+id); };
+      const pk=el.querySelector("[data-pick]"); if(pk) pk.onchange=()=>{ pk.checked?selected.add(id):selected.delete(id); draw(); };
+      const pdf=el.querySelector("[data-pdf]"); if(pdf) pdf.onclick=async(e)=>{ const b=e.currentTarget; b.disabled=true; try{ const s=await loadSheet(id); await exportPDF(s); }catch(err){ toast("Impossible d’ouvrir la feuille"); } b.disabled=false; };
+      const sm=el.querySelector("[data-smenu]"); if(sm) sm.onclick=()=>sheetMenu(rows.find(r=>r.id===id));
+      el.addEventListener("dragstart",e=>{ e.dataTransfer.setData("text/plain",id); el.classList.add("dragging"); });
+      el.addEventListener("dragend",()=>el.classList.remove("dragging"));
+    });
+    // Glisser-déposer (ordinateur) vers un dossier ou le fil d'Ariane
+    document.querySelectorAll("#xlist [data-drop], #crumbs [data-drop]").forEach(t=>{
+      t.addEventListener("dragover",e=>{ e.preventDefault(); t.classList.add("over"); });
+      t.addEventListener("dragleave",()=>t.classList.remove("over"));
+      t.addEventListener("drop",e=>{ e.preventDefault(); t.classList.remove("over"); const id=e.dataTransfer.getData("text/plain"); if(!id) return;
+        const dest=t.dataset.drop||""; const m={...(settings.sheetFolder||{})}; if(dest) m[id]=dest; else delete m[id]; saveSettings({sheetFolder:m});
+        toast("Déplacé dans « "+(dest?fById(dest).name:"Enregistrements")+" »"); draw(); });
+    });
+    // Folders selected via their row in selection mode
+    if(selecting) $("xlist").querySelectorAll(".xrow.folder").forEach(el=>{ const on=selected.has("f:"+el.dataset.fid); el.classList.toggle("sel",on); const c=el.querySelector(".xcheck"); if(c) c.classList.toggle("on",on); });
+    // Barre de sélection
+    const sb=$("selbar");
+    document.body.classList.toggle("selecting",selecting);
+    if(selecting){
+      const sIds=[...selected].filter(x=>!x.startsWith("f:")), fIds=[...selected].filter(x=>x.startsWith("f:")).map(x=>x.slice(2));
+      const n=sIds.length+fIds.length;
+      sb.hidden=false;
+      sb.innerHTML='<span class="selcount">'+(n?n+' sélectionné'+(n>1?'s':''):'Touche des éléments pour les sélectionner')+'</span>'+
+        '<button class="btn" type="button" id="sall">Tout</button>'+
+        '<button class="btn" type="button" id="smove" '+(n?'':'disabled')+'>Déplacer</button>'+
+        '<button class="btn primary" type="button" id="srecap" '+(sIds.length?'':'disabled')+'>Rapport</button>'+
+        '<button class="btn danger" type="button" id="sdel" '+(sIds.length&&!fIds.length?'':'disabled')+'>Supprimer</button>';
+      $("sall").onclick=()=>{ sheetsHere.forEach(r=>selected.add(r.id)); sub.forEach(f=>selected.add("f:"+f.id)); draw(); };
+      $("smove").onclick=()=>moveDialog(sIds,fIds,()=>{ selected.clear(); draw(); });
+      $("srecap").onclick=()=>recapDialog(rows.filter(r=>sIds.includes(r.id)), fobj?fobj.name:"");
+      $("sdel").onclick=()=>dialog("Supprimer "+sIds.length+" feuille"+(sIds.length>1?"s":"")+" ?","<p>Elles seront effacées pour tous les appareils. Cette action est définitive.</p>",[{label:"Annuler"},{label:"Supprimer",danger:true,run:async()=>{
+        const m={...(settings.sheetFolder||{})}; let fail=0;
+        for(const id of sIds){ try{ await deleteSheet(id); delete m[id]; cachedRows=cachedRows.filter(r=>r.id!==id); }catch(e){ fail++; } }
+        saveSettings({sheetFolder:m}); selected.clear(); toast(fail?"Certaines feuilles n’ont pas pu être supprimées (hors ligne ?)":"Supprimé"); draw(); }}]);
+    } else { sb.hidden=true; sb.innerHTML=""; }
+  }
+  function folderMenu(f){
+    dialog("Dossier « "+f.name+" »","",[
+      {label:"Renommer",run:()=>{ setTimeout(()=>askName("Renommer le dossier",f.name,name=>{ saveSettings({folders:folders().map(x=>x.id===f.id?{...x,name}:x)}); draw(); }),0); }},
+      {label:"Déplacer",run:()=>{ setTimeout(()=>moveDialog([],[f.id],()=>draw()),0); }},
+      {label:"Supprimer",danger:true,run:()=>{ setTimeout(()=>dialog("Supprimer « "+f.name+" » ?","<p>Les feuilles et les sous-dossiers ne sont pas supprimés : ils remontent dans le dossier parent.</p>",[{label:"Annuler"},{label:"Supprimer le dossier",danger:true,run:()=>{
+        const up=parentOf(f); const m={...(settings.sheetFolder||{})}; Object.keys(m).forEach(k=>{ if(m[k]===f.id){ if(up) m[k]=up; else delete m[k]; } });
+        const fl=folders().filter(x=>x.id!==f.id).map(x=>x.parent===f.id?{...x,parent:up}:x);
+        saveSettings({folders:fl,sheetFolder:m}); if(folderId===f.id) go("enregistrements"+(up?"/"+up:"")); else draw(); }}]),0); }},
+      {label:"Fermer"}]);
+  }
+  function sheetMenu(r){
+    if(!r) return;
+    dialog((r.adversaire?"vs "+r.adversaire:"Feuille")+" · "+(TYPE_LAB[r.type]||""),"",[
+      {label:"Ouvrir",primary:true,run:()=>{ go(r.type+"/"+r.id); }},
+      {label:"Déplacer",run:()=>{ setTimeout(()=>moveDialog([r.id],[],()=>draw()),0); }},
+      {label:"Supprimer",danger:true,run:()=>{ setTimeout(()=>dialog("Supprimer cette feuille ?","<p>Elle sera effacée pour tous les appareils. Cette action est définitive.</p>",[{label:"Annuler"},{label:"Supprimer",danger:true,run:async()=>{
+        try{ await deleteSheet(r.id); const m={...(settings.sheetFolder||{})}; delete m[r.id]; saveSettings({sheetFolder:m}); cachedRows=cachedRows.filter(x=>x.id!==r.id); toast("Feuille supprimée"); draw(); }catch(e){ toast("Suppression impossible hors ligne"); } }}]),0); }},
+      {label:"Fermer"}]);
+  }
 }
 
 /* ---------- Rapport récapitulatif de plusieurs feuilles ---------- */
@@ -346,11 +440,11 @@ function showLogin(expired){
 
 /* ---------- Navigation ---------- */
 async function route(){
-  document.body.classList.remove("correct");
+  document.body.classList.remove("correct","selecting"); selected.clear();
   const h=location.hash.slice(1)||"accueil";
   const [view,id]=h.split("/");
   window.scrollTo(0,0);
-  if(view==="enregistrements") return renderRecords();
+  if(view==="enregistrements") return renderRecords(id||null);
   if((view==="passeurs"||view==="equipe") && id) return openSheet(view,id);
   renderHome();
 }
