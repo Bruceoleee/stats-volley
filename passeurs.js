@@ -172,9 +172,8 @@ function mount(root, sheet, ctx){
 }
 
 /* ---------- Rapport PDF : page 1 = match complet, puis une page identique par set ---------- */
-function pdf(sheet, team){
-  const d=sheet.data, R=window.VSReport(), {doc,M,CW,C,mix,P}=R;
-  const sets=played(d);
+function pdfFor(d, team, layout){
+  const R=window.VSReport(), {doc,M,CW,C,mix,P}=R;
   const name=w=>nameOf(d,w);
 
   function court(x,y0,w,s,label){
@@ -219,13 +218,54 @@ function pdf(sheet, team){
     R.distBox(M+bw+12,R.y,bw,"Réception adverse",P(r.plus,r.n),"de 2 et plus · "+r.n+" réc.",RN.map(n=>({lab:"Note "+n,count:r.c[n],pct:P(r.c[n],r.n),color:n===0?C.M:n===2?C.J:C.X})));
     R.y+=86;
   }
-  const opp=(d.opp?"contre "+d.opp:"Adversaire non précisé")+"  ·  "+(d.date||"");
-  R.header("STATS PASSEURS", opp, team+" · sets joués : "+sets.length, "Passeurs : "+name(1)+" et "+name(2));
-  body(filt(d,"all"),"match complet");
-  sets.forEach(s=>{ R.newPage(); R.subHeader("SET "+s, opp, team); body(filt(d,s),"set "+s); });
-  return R.finish("Stats passeurs · "+team+(d.opp?" · contre "+d.opp:"")+" · "+(d.date||""));
+  return layout(R, body, name);
+}
+function pdf(sheet, team){
+  const d=sheet.data;
+  return pdfFor(d, team, (R, body, name)=>{
+    const sets=played(d);
+    const opp=(d.opp?"contre "+d.opp:"Adversaire non précisé")+"  ·  "+(d.date||"");
+    R.header("STATS PASSEURS", opp, team+" · sets joués : "+sets.length, "Passeurs : "+name(1)+" et "+name(2));
+    body(filt(d,"all"),"match complet");
+    sets.forEach(s=>{ R.newPage(); R.subHeader("SET "+s, opp, team); body(filt(d,s),"set "+s); });
+    return R.finish("Stats passeurs · "+team+(d.opp?" · contre "+d.opp:"")+" · "+(d.date||""));
+  });
+}
+
+/* ---------- Rapport récapitulatif de plusieurs matchs ---------- */
+// Les passeurs sont regroupés par nom ; s'il y a plus de deux noms différents, par position (passeur 1 / passeur 2).
+function recap(sheets, team, title){
+  sheets=[...sheets].sort((a,b)=>(a.data.date||"").localeCompare(b.data.date||""));
+  const norm=x=>(x||"").trim().toLowerCase();
+  const names=[];
+  sheets.forEach(sh=>[1,2].forEach(w=>{ const n=(w===1?sh.data.n1:sh.data.n2)||""; if(n.trim() && !names.some(x=>norm(x)===norm(n))) names.push(n.trim()); }));
+  const byName=names.length>0 && names.length<=2;
+  const slotOf=(sh,w)=>{ if(!byName) return w; const n=norm(w===1?sh.data.n1:sh.data.n2); const i=names.findIndex(x=>norm(x)===n); return i>=0?i+1:w; };
+  const v={ n1:byName?(names[0]||""):(sheets[0]&&sheets[0].data.n1)||"", n2:byName?(names[1]||""):(sheets[0]&&sheets[0].data.n2)||"", events:[] };
+  const perMatch=sheets.map((sh,mi)=>{ const ev=sh.data.events.map(e=>e.k==="p"?Object.assign({},e,{w:slotOf(sh,e.w),m:mi}):Object.assign({},e,{m:mi})); v.events.push(...ev); return {sh,ev}; });
+  const dates=sheets.map(x=>x.data.date).filter(Boolean).sort();
+  const period=dates.length?(dates[0]===dates[dates.length-1]?dates[0]:dates[0]+" au "+dates[dates.length-1]):"";
+  return pdfFor(v, team, (R, body, name)=>{
+    const {doc,M,CW,C,P}=R;
+    R.header("RÉCAPITULATIF PASSEURS", (title||"Plusieurs matchs")+(period?"  ·  "+period:""), team+" · "+sheets.length+" match"+(sheets.length>1?"s":""), "Passeurs : "+name(1)+" et "+name(2));
+    body(v.events,"tous les matchs");
+    R.newPage(); R.subHeader("PAR MATCH", (title||"")+(period?"  ·  "+period:""), team);
+    R.title("Résultats de chaque match","Passes en système · hors système et réception adverse : toute l’équipe");
+    const rows=[];
+    perMatch.forEach(({sh,ev})=>{
+      const lab=((sh.data.date||"").slice(5).replace("-","/")+" "+(sh.data.opp||"Adversaire ?")).slice(0,30);
+      const h=hsStats(ev), r=recStats(ev);
+      [1,2].forEach((w,i)=>{ const p=passStats(ev,w); if(!p.total && i>0) return;
+        rows.push([i===0?lab:"", name(w), p.total, P(p.M,p.total), P(p.M+p.A,p.total), i===0?P(h.R,h.n):"", i===0?P(r.plus,r.n):""]); });
+    });
+    const all=passStats(v.events,"both"), ha=hsStats(v.events), ra=recStats(v.events);
+    rows.push(["Tous les matchs","Les deux",all.total,P(all.M,all.total),P(all.M+all.A,all.total),P(ha.R,ha.n),P(ra.plus,ra.n)]);
+    R.table([{h:"Match",w:3},{h:"Passeur",w:1.8},{h:"Passes",w:1},{h:"% marquée",w:1.2,color:C.M},{h:"% efficace",w:1.2,color:C.accent},{h:"Hors syst. %",w:1.3},{h:"Réc. adv. 2+",w:1.3}],rows,{boldLast:true,rh:17,fs:9});
+    if(!byName && names.length>2){ R.font("normal",8.5,C.muted); doc.text("Plus de deux noms de passeurs : les passeurs sont regroupés par position sur la feuille (passeur 1 / passeur 2).",M,R.y+4); }
+    return R.finish("Récapitulatif passeurs · "+team+(title?" · "+title:""));
+  });
 }
 
 
-window.PasseursSheet = { blank, mount, summary, pdf };
+window.PasseursSheet = { blank, mount, summary, pdf, recap };
 })();

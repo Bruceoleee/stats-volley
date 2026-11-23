@@ -169,34 +169,109 @@ function renderHome(){
 
 function itemHTML(r){
   const d=dateParts(r.date);
+  const f=folderOf(r.id);
   return '<div class="rec-item" data-id="'+esc(r.id)+'" data-type="'+esc(r.type)+'">'+
     '<div class="date"><b>'+d.d+'</b><span>'+d.m+'</span></div>'+
-    '<button class="main" type="button" data-open aria-label="Ouvrir"><span class="opp"><span class="badge '+esc(r.type)+'">'+(TYPE_LAB[r.type]||r.type)+'</span>'+(r.adversaire?"vs "+esc(r.adversaire):"Adversaire non précisé")+'</span><span class="sub">'+esc(r.resume||"")+'</span></button>'+
-    '<div class="acts"><button class="btn sm" type="button" data-pdf>PDF</button><button class="btn sm danger" type="button" data-del aria-label="Supprimer">✕</button></div></div>';
+    '<button class="main" type="button" data-open aria-label="Ouvrir"><span class="opp"><span class="badge '+esc(r.type)+'">'+(TYPE_LAB[r.type]||r.type)+'</span>'+(r.adversaire?"vs "+esc(r.adversaire):"Adversaire non précisé")+'</span><span class="sub">'+(f?'<span class="fchip">'+esc(f.name)+'</span>':'')+esc(r.resume||"")+'</span></button>'+
+    '<div class="acts"><button class="btn sm" type="button" data-pdf>PDF</button><button class="btn sm" type="button" data-move>Dossier</button><button class="btn sm danger" type="button" data-del aria-label="Supprimer">✕</button></div></div>';
 }
-function bindItems(root){
+function bindItems(root, onChange){
   root.querySelectorAll(".rec-item").forEach(el=>{
     const id=el.dataset.id, type=el.dataset.type;
     el.querySelector("[data-open]").onclick=()=>go(type+"/"+id);
     el.querySelector("[data-pdf]").onclick=async(e)=>{ const b=e.currentTarget; b.disabled=true; try{ const s=await loadSheet(id); await exportPDF(s); }catch(err){ toast("Impossible d’ouvrir la feuille"); } b.disabled=false; };
+    const mv=el.querySelector("[data-move]"); if(mv) mv.onclick=()=>moveDialog([id], onChange);
     el.querySelector("[data-del]").onclick=()=>dialog("Supprimer cette feuille ?","<p>Elle sera effacée pour tous les appareils. Cette action est définitive.</p>",[
-      {label:"Annuler"},{label:"Supprimer",danger:true,run:async()=>{ try{ await deleteSheet(id); el.remove(); toast("Feuille supprimée"); }catch(e){ toast("Suppression impossible hors ligne"); } }}]);
+      {label:"Annuler"},{label:"Supprimer",danger:true,run:async()=>{ try{ await deleteSheet(id); const m={...(settings.sheetFolder||{})}; delete m[id]; saveSettings({sheetFolder:m}); el.remove(); toast("Feuille supprimée"); }catch(e){ toast("Suppression impossible hors ligne"); } }}]);
   });
 }
 
-let filter="all";
+/* ---------- Dossiers (gardés dans les réglages partagés) ---------- */
+const folders=()=>settings.folders||[];
+const folderOf=id=>{ const fid=(settings.sheetFolder||{})[id]; return fid?folders().find(f=>f.id===fid):null; };
+function askName(title, initial, cb){
+  dialog(title,'<label class="f" for="fname">Nom du dossier<input type="text" id="fname" autocomplete="off" placeholder="ex. Tournoi Chicoutimi 22 nov."></label>',[
+    {label:"Annuler"},
+    {label:"Enregistrer",primary:true,run:()=>{ const v=$("fname").value.trim(); if(!v){ toast("Écris un nom"); return true; } cb(v); }}]);
+  $("fname").value=initial||""; setTimeout(()=>$("fname").focus(),50);
+}
+function moveDialog(ids, onChange){
+  const cur=ids.length===1?(settings.sheetFolder||{})[ids[0]]||"":"";
+  const opts=[{id:"",name:"Aucun dossier"},...folders()];
+  dialog(ids.length>1?"Placer "+ids.length+" feuilles dans…":"Placer dans un dossier",
+    '<div class="flist">'+opts.map(f=>'<button type="button" class="chip-btn" data-fid="'+esc(f.id)+'" aria-pressed="'+(f.id===cur)+'">'+esc(f.name)+'</button>').join("")+'<button type="button" class="chip-btn add" id="fnew">+ Nouveau dossier</button></div>',
+    [{label:"Fermer"}]);
+  const apply=fid=>{ const m={...(settings.sheetFolder||{})}; ids.forEach(id=>{ if(fid) m[id]=fid; else delete m[id]; }); saveSettings({sheetFolder:m}); $("dlg").close(); toast(fid?"Classée dans « "+folders().find(f=>f.id===fid).name+" »":"Retirée du dossier"); onChange&&onChange(); };
+  document.querySelectorAll("#dlg [data-fid]").forEach(b=>b.onclick=()=>apply(b.dataset.fid));
+  $("fnew").onclick=()=>{ $("dlg").close(); askName("Nouveau dossier","",name=>{ const f={id:uid(),name}; saveSettings({folders:[...folders(),f]}); apply(f.id); }); };
+}
+
+let filter="all", folderFilter="all";
 async function renderRecords(){
   app.innerHTML='<div class="wrap">'+topbar("Enregistrements")+
-    '<div class="filters" id="filters"></div><div class="rec-list" id="list"><div class="empty">Chargement…</div></div></div>';
+    '<div class="folders" id="folders"></div><div class="filters" id="filters"></div><div class="folderbar" id="folderbar"></div><div class="rec-list" id="list"><div class="empty">Chargement…</div></div></div>';
   bindGo(app);
-  const rows = await listSheets();
+  await loadSettings();
+  let rows = await listSheets();
   const draw=()=>{
-    $("filters").innerHTML=[["all","Toutes"],["passeurs","Passeurs"],["equipe","Équipe"]].map(([v,l])=>'<button class="chip-btn" type="button" data-f="'+v+'" aria-pressed="'+(filter===v)+'">'+l+'</button>').join("");
+    if(folderFilter!=="all" && folderFilter!=="none" && !folders().some(f=>f.id===folderFilter)) folderFilter="all";
+    const inFolder=r=>folderFilter==="all"||(folderFilter==="none"?!folderOf(r.id):(settings.sheetFolder||{})[r.id]===folderFilter);
+    const count=fid=>rows.filter(r=>fid==="none"?!folderOf(r.id):(settings.sheetFolder||{})[r.id]===fid).length;
+    $("folders").innerHTML='<span class="cap">Dossiers</span>'+[["all","Toutes ("+rows.length+")"],["none","Sans dossier ("+count("none")+")"],...folders().map(f=>[f.id,f.name+" ("+count(f.id)+")"])]
+      .map(([v,l])=>'<button class="chip-btn'+(v!=="all"&&v!=="none"?' folder':'')+'" type="button" data-ff="'+esc(v)+'" aria-pressed="'+(folderFilter===v)+'">'+esc(l)+'</button>').join("")+
+      '<button class="chip-btn add" type="button" id="addfolder">+ Nouveau dossier</button>';
+    $("folders").querySelectorAll("[data-ff]").forEach(b=>b.onclick=()=>{ folderFilter=b.dataset.ff; draw(); });
+    $("addfolder").onclick=()=>askName("Nouveau dossier","",name=>{ const f={id:uid(),name}; saveSettings({folders:[...folders(),f]}); folderFilter=f.id; draw(); });
+    $("filters").innerHTML='<span class="cap">Type</span>'+[["all","Toutes"],["passeurs","Passeurs"],["equipe","Équipe"]].map(([v,l])=>'<button class="chip-btn" type="button" data-f="'+v+'" aria-pressed="'+(filter===v)+'">'+l+'</button>').join("");
     $("filters").querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>{ filter=b.dataset.f; draw(); });
-    const r=rows.filter(x=>filter==="all"||x.type===filter);
-    $("list").innerHTML = r.length ? r.map(itemHTML).join("") : '<div class="empty">Aucune feuille pour l’instant. Crée-en une depuis l’accueil.</div>';
-    bindItems($("list"));
+    const r=rows.filter(x=>(filter==="all"||x.type===filter)&&inFolder(x));
+    const fobj=folders().find(f=>f.id===folderFilter);
+    $("folderbar").innerHTML=(r.length?'<button class="btn primary" type="button" id="recapbtn">Rapport récapitulatif</button>':'')+
+      (fobj?'<button class="btn" type="button" id="renf">Renommer le dossier</button><button class="btn danger" type="button" id="delf">Supprimer le dossier</button>':'');
+    if($("recapbtn")) $("recapbtn").onclick=()=>recapDialog(r, fobj?fobj.name:"");
+    if(fobj){
+      $("renf").onclick=()=>askName("Renommer le dossier",fobj.name,name=>{ saveSettings({folders:folders().map(f=>f.id===fobj.id?{...f,name}:f)}); draw(); });
+      $("delf").onclick=()=>dialog("Supprimer le dossier « "+fobj.name+" » ?","<p>Les feuilles ne sont pas supprimées : elles retournent dans « Sans dossier ».</p>",[{label:"Annuler"},{label:"Supprimer le dossier",danger:true,run:()=>{
+        const m={...(settings.sheetFolder||{})}; Object.keys(m).forEach(k=>{ if(m[k]===fobj.id) delete m[k]; });
+        saveSettings({folders:folders().filter(f=>f.id!==fobj.id),sheetFolder:m}); folderFilter="all"; draw(); }}]);
+    }
+    $("list").innerHTML = r.length ? r.map(itemHTML).join("") : '<div class="empty">'+(fobj?'Ce dossier est vide. Utilise le bouton « Dossier » d’une feuille pour l’y placer.':'Aucune feuille ici pour l’instant.')+'</div>';
+    bindItems($("list"), draw);
   };
+  draw();
+}
+
+/* ---------- Rapport récapitulatif de plusieurs feuilles ---------- */
+function recapDialog(rows, folderName){
+  const has=t=>rows.some(x=>x.type===t);
+  let type=filter!=="all"&&has(filter)?filter:(rows.filter(x=>x.type==="passeurs").length>=rows.filter(x=>x.type==="equipe").length?"passeurs":"equipe");
+  let picked=new Set(rows.map(x=>x.id));
+  const body=()=>{
+    const list=rows.filter(x=>x.type===type);
+    return '<div class="seg" style="margin-bottom:8px">'+["passeurs","equipe"].map(t=>'<button type="button" data-rt="'+t+'" aria-pressed="'+(type===t)+'" '+(has(t)?'':'disabled')+'>'+TYPE_LAB[t]+'</button>').join("")+'</div>'+
+      '<label class="f" for="rtitle">Titre du rapport<input type="text" id="rtitle" autocomplete="off" placeholder="ex. Tournoi du 22 novembre"></label>'+
+      '<div class="sec" style="margin-top:10px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Feuilles à inclure</div>'+
+      '<div class="picklist">'+list.map(x=>{ const dp=dateParts(x.date); return '<label class="pick"><input type="checkbox" data-pk="'+esc(x.id)+'" '+(picked.has(x.id)?'checked':'')+'><span><b>'+dp.d+' '+dp.m+'</b> '+(x.adversaire?"vs "+esc(x.adversaire):"Adversaire non précisé")+'</span></label>'; }).join("")+'</div>';
+  };
+  const d=dialog("Rapport récapitulatif",'<div id="rbody"></div>',[
+    {label:"Annuler"},
+    {label:"Créer le PDF",primary:true,run:async(btn)=>{
+      const ids=rows.filter(x=>x.type===type&&picked.has(x.id)).map(x=>x.id);
+      if(!ids.length){ toast("Choisis au moins une feuille"); return true; }
+      if(!window.jspdf){ toast("Le module PDF n’est pas chargé (réseau ?)"); return true; }
+      btn.disabled=true; btn.textContent="Préparation…";
+      try{
+        const sheets=[]; for(const id of ids){ const s=await loadSheet(id); if(s) sheets.push(s); }
+        const title=$("rtitle").value.trim()||folderName||"";
+        const blob=MODULES[type].recap(sheets, TEAM, title);
+        await saveBlob(blob,"Récap "+TYPE_LAB[type].toLowerCase()+" "+(title?title.replace(/[\\/:*?"<>|]+/g,"")+" ":"")+today()+".pdf");
+        return false;
+      }catch(e){ console.error(e); toast("Le rapport n’a pas pu être créé"); }
+      btn.disabled=false; btn.textContent="Créer le PDF"; return true;
+    }}]);
+  const draw=()=>{ const t=$("rtitle")?$("rtitle").value:folderName; $("rbody").innerHTML=body(); $("rtitle").value=t||"";
+    $("rbody").querySelectorAll("[data-rt]").forEach(b=>b.onclick=()=>{ type=b.dataset.rt; draw(); });
+    $("rbody").querySelectorAll("[data-pk]").forEach(c=>c.onchange=()=>{ if(c.checked) picked.add(c.dataset.pk); else picked.delete(c.dataset.pk); }); };
   draw();
 }
 
@@ -234,6 +309,9 @@ async function exportPDF(sheet){
   let blob;
   try{ blob = M.pdf(sheet, TEAM); }catch(e){ console.error(e); toast("Le PDF n’a pas pu être créé"); return; }
   const fname = "Stats "+TYPE_LAB[sheet.type].toLowerCase()+" "+(sheet.adversaire?sheet.adversaire.replace(/[\\/:*?"<>|]+/g,"")+" ":"")+(sheet.date||"")+".pdf";
+  return saveBlob(blob, fname);
+}
+async function saveBlob(blob, fname){
   if(window.claude && typeof window.claude.use==="function"){
     try{ const dl=await window.claude.use("downloads"); if(dl){ await dl.save({filename:fname,data:blob}); return; } }
     catch(e){ if(e && e.code==="declined") return; }

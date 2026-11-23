@@ -306,3 +306,18 @@ table.st{border-collapse:collapse;width:100%;font-size:14px;background:var(--pan
 .st.eff td .sub{font-size:11px}
 .st.eff th,.st.eff td{padding:6px 5px}
 .st.eff td:first-child{white-space:normal;min-width:88px}
+
+/* Dossiers et rapport récapitulatif */
+.folders,.filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.folders .cap,.filters .cap{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-right:4px;min-width:64px}
+.chip-btn.folder::before{content:"";display:inline-block;width:12px;height:9px;border:2px solid currentColor;border-radius:2px;margin-right:6px;vertical-align:-1px;border-top-width:3px}
+.chip-btn.add{border-style:dashed;color:var(--accent);background:transparent}
+.folderbar{display:flex;flex-wrap:wrap;gap:8px}
+.folderbar:empty{display:none}
+.fchip{display:inline-block;font-size:11px;font-weight:700;color:var(--accent);background:var(--court);padding:1px 8px;border-radius:99px;margin-right:6px}
+.flist{display:flex;flex-wrap:wrap;gap:8px}
+.picklist{display:flex;flex-direction:column;gap:4px;max-height:45vh;overflow:auto;margin-top:6px}
+.pick{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;font-size:15px;cursor:pointer}
+.pick input{width:22px;height:22px;flex:none}
+.pick b{font-family:var(--display);font-size:16px;margin-right:4px}
+@media (max-width:560px){.rec-item .acts{flex-direction:column}.rec-item .acts .btn{min-height:32px}}

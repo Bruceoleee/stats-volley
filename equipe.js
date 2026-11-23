@@ -233,9 +233,8 @@ function mount(root, sheet, ctx){
 }
 
 /* ---------- Rapport PDF (paysage) : page 1 = match complet, puis une page identique par set ---------- */
-function pdf(sheet, team){
-  const d=sheet.data, R=window.VSReport({landscape:true}), {doc,M,CW,C,P,mix}=R;
-  const sets=played(d);
+function pdfFor(d, team, layout){
+  const R=window.VSReport({landscape:true}), {doc,M,CW,C,P,mix}=R;
   function miniBox(x,y0,w,h,title,lines){
     R.fill(C.soft); doc.roundedRect(x,y0,w,h,6,6,"F");
     R.font("bold",9,C.accent); doc.text(title.toUpperCase(),x+10,y0+15);
@@ -243,8 +242,9 @@ function pdf(sheet, team){
       R.font("normal",8.5,C.muted); doc.text(l[0],x+10,yy);
       R.font("bold",9.5,l[2]||C.ink); doc.text(String(l[1]),x+w-10,yy,{align:"right"}); });
   }
-  function body(scope, label){
-    const E=filt(d,scope), S=stats(E);
+  // E : actions ; ids : joueurs (dans l'ordre) ; extra : colonne en plus {h, get(id)}
+  function body(E, label, ids, extra){
+    const S=stats(E);
     R.title("Équipe · "+label);
     const n=5, gap=8, bw=(CW-(n-1)*gap)/n, h=96, y0=R.y;
     miniBox(M,y0,bw,h,"Service",[["Total",S.srv.n],["Aces",S.srv.A,C.M],["En jeu",S.srv.I],["Erreurs",S.srv.E,C.X],["% en jeu",P(S.srv.A+S.srv.I,S.srv.n),C.accent]]);
@@ -254,9 +254,9 @@ function pdf(sheet, team){
     miniBox(M+4*(bw+gap),y0,bw,h,"Défense",[["Réussies",S.def.R,C.M],["Manquées",S.def.E,C.X]]);
     R.y=y0+h+12;
     R.title("Par joueur · "+label,"% trav. = (kills + en jeu) / attaques · % 2+ = réceptions de 2 et 3");
-    const showSets=scope==="all";
+    const showSets=!!extra;
     const cols=[{h:"Joueur",w:3.2}];
-    if(showSets) cols.push({h:"Sets",w:1.2});
+    if(showSets) cols.push({h:extra.h,w:1.2});
     [["Tot",1],["Ace",1,C.M],["Jeu",1],["Err",1,C.X],["% jeu",1.25]].forEach(([h2,w,c])=>cols.push({h:h2,w,color:c,group:"Service"}));
     [["Tot",1],["Kill",1,C.M],["Jeu",1],["Err",1,C.X],["% kill",1.25],["% trav.",1.3],["% err",1.25]].forEach(([h2,w,c])=>cols.push({h:h2,w,color:c,group:"Attaque"}));
     [["Nb",1],["% 0",1.15,C.X],["% 2",1.15],["% 3",1.15,C.M],["% 2+",1.2]].forEach(([h2,w,c])=>cols.push({h:h2,w,color:c,group:"Réception"}));
@@ -265,16 +265,61 @@ function pdf(sheet, team){
     const line=(lab,s,sets)=>{ const r=[lab]; if(showSets) r.push(sets);
       r.push(s.srv.n,s.srv.A,s.srv.I,s.srv.E,P(s.srv.A+s.srv.I,s.srv.n), s.att.n,s.att.K,s.att.I,s.att.E,P(s.att.K,s.att.n),P(s.att.K+s.att.I,s.att.n),P(s.att.E,s.att.n),
         s.rec.n,P(s.rec.c[0],s.rec.n),P(s.rec.c[2],s.rec.n),P(s.rec.c[3],s.rec.n),P(s.rec.plus,s.rec.n), s.blk.G,s.blk.T, s.def.R,s.def.E); return r; };
-    const rows=rowsFor(d,scope).map(id=>line(pName(d,id).slice(0,24),stats(E.filter(e=>e.p===id)),setsOf(d,id).join(" ")));
+    const rows=ids.map(id=>line(pName(d,id).slice(0,24),stats(E.filter(e=>e.p===id)),extra?extra.get(id):""));
     rows.push(line("Équipe",S,""));
     R.table(cols,rows,{boldLast:true,rh:15,fs:8,hfs:6.3});
   }
-  const opp=(d.opp?"contre "+d.opp:"Adversaire non précisé")+"  ·  "+(d.date||"");
-  R.header("STATS ÉQUIPE",opp,team,"Sets joués : "+sets.length);
-  body("all","match complet");
-  sets.forEach(s=>{ R.newPage(); R.subHeader("SET "+s,opp,team); body(s,"set "+s); });
-  return R.finish("Stats équipe · "+team+(d.opp?" · contre "+d.opp:"")+" · "+(d.date||""));
+  return layout(R, body);
+}
+function pdf(sheet, team){
+  const d=sheet.data;
+  return pdfFor(d, team, (R, body)=>{
+    const sets=played(d);
+    const opp=(d.opp?"contre "+d.opp:"Adversaire non précisé")+"  ·  "+(d.date||"");
+    R.header("STATS ÉQUIPE",opp,team,"Sets joués : "+sets.length);
+    body(filt(d,"all"),"match complet",rowsFor(d,"all"),{h:"Sets",get:id=>setsOf(d,id).join(" ")});
+    sets.forEach(s=>{ R.newPage(); R.subHeader("SET "+s,opp,team); body(filt(d,s),"set "+s,rowsFor(d,s)); });
+    return R.finish("Stats équipe · "+team+(d.opp?" · contre "+d.opp:"")+" · "+(d.date||""));
+  });
 }
 
-window.EquipeSheet={ blank, mount, summary, pdf };
+/* ---------- Rapport récapitulatif de plusieurs matchs ---------- */
+// Les joueurs sont regroupés par numéro et nom, d'un match à l'autre.
+function recap(sheets, team, title){
+  sheets=[...sheets].sort((a,b)=>(a.data.date||"").localeCompare(b.data.date||""));
+  const key=p=>(String(p.num||"").trim()+"|"+String(p.name||"").trim().toLowerCase());
+  const v={players:[],events:[],lineups:{}};
+  const matchesOf={};
+  const perMatch=sheets.map((sh,mi)=>{
+    const d=sh.data, map={};
+    (d.players||[]).forEach(p=>{ const k=key(p); map[p.id]=k; if(!v.players.some(x=>x.id===k)) v.players.push({id:k,num:p.num,name:p.name}); });
+    const ev=(d.events||[]).map(e=>({...e,p:e.p==null?null:(map[e.p]||e.p),m:mi}));
+    ev.forEach(e=>{ if(e.p!=null){ (matchesOf[e.p]=matchesOf[e.p]||new Set()).add(mi); } });
+    v.events.push(...ev);
+    return {sh,ev};
+  });
+  v.players.sort((a,b)=>(parseInt(a.num)||999)-(parseInt(b.num)||999));
+  const ids=v.players.map(p=>p.id).filter(id=>matchesOf[id]);
+  if(v.events.some(e=>e.p==null)) ids.push(null);
+  const dates=sheets.map(x=>x.data.date).filter(Boolean).sort();
+  const period=dates.length?(dates[0]===dates[dates.length-1]?dates[0]:dates[0]+" au "+dates[dates.length-1]):"";
+  return pdfFor(v, team, (R, body)=>{
+    const {C,P}=R;
+    R.header("RÉCAPITULATIF ÉQUIPE",(title||"Plusieurs matchs")+(period?"  ·  "+period:""),team,sheets.length+" match"+(sheets.length>1?"s":""));
+    body(v.events,"tous les matchs",ids,{h:"Matchs",get:id=>id&&matchesOf[id]?matchesOf[id].size:""});
+    R.newPage(); R.subHeader("PAR MATCH",(title||"")+(period?"  ·  "+period:""),team);
+    R.title("Résultats de l’équipe à chaque match");
+    const line=(lab,s)=>[lab,s.srv.n,P(s.srv.A+s.srv.I,s.srv.n),s.srv.A,s.att.n,P(s.att.K,s.att.n),P(s.att.K+s.att.I,s.att.n),P(s.att.E,s.att.n),s.rec.n,P(s.rec.c[0],s.rec.n),P(s.rec.plus,s.rec.n),s.blk.G,s.blk.T,s.def.R,s.def.E];
+    const rows=perMatch.map(({sh,ev})=>line(((sh.data.date||"").slice(5).replace("-","/")+" "+(sh.data.opp||"Adversaire ?")).slice(0,34),stats(ev)));
+    rows.push(line("Tous les matchs",stats(v.events)));
+    R.table([{h:"Match",w:3.6},{h:"Tot",w:1,group:"Service"},{h:"% jeu",w:1.2,group:"Service"},{h:"Aces",w:1,group:"Service",color:C.M},
+      {h:"Tot",w:1,group:"Attaque"},{h:"% kill",w:1.2,group:"Attaque",color:C.M},{h:"% trav.",w:1.25,group:"Attaque"},{h:"% err",w:1.2,group:"Attaque",color:C.X},
+      {h:"Nb",w:1,group:"Réception"},{h:"% 0",w:1.1,group:"Réception",color:C.X},{h:"% 2+",w:1.15,group:"Réception"},
+      {h:"Gagné",w:1.15,group:"Bloc",color:C.M},{h:"Touché",w:1.2,group:"Bloc"},{h:"Réus.",w:1.1,group:"Défense",color:C.M},{h:"Manq.",w:1.1,group:"Défense",color:C.X}],
+      rows,{boldLast:true,rh:17,fs:8.5,hfs:6.5});
+    return R.finish("Récapitulatif équipe · "+team+(title?" · "+title:""));
+  });
+}
+
+window.EquipeSheet={ blank, mount, summary, pdf, recap };
 })();
